@@ -1,0 +1,178 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum TenantStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+}
+
+enum UserRole {
+  SUPER_ADMIN
+  SCHOOL_ADMIN
+  ACCOUNTANT
+  CASHIER
+  AUDITOR
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum StudentStatus {
+  ACTIVE
+  PROMOTED
+  TRANSFERRED
+  ALUMNI
+}
+
+// -------------------------------------------------------------
+// Core Multi-Tenant Foundation: School / Tenant
+// -------------------------------------------------------------
+model School {
+  id            String         @id @default(uuid())
+  code          String         @unique // e.g. "SCH001"
+  name          String
+  address       String?
+  city          String?
+  state         String?
+  country       String         @default("IN")
+  currency      String         @default("INR")
+  timezone      String         @default("Asia/Kolkata")
+  status        TenantStatus   @default(ACTIVE)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  users         User[]
+  academicYears AcademicYear[]
+  grades        GradeClass[]
+  sections      Section[]
+  students      Student[]
+
+  @@map("schools")
+}
+
+// -------------------------------------------------------------
+// School Staff & Administration Users
+// -------------------------------------------------------------
+model User {
+  id           String     @id @default(uuid())
+  schoolId     String
+  email        String
+  passwordHash String
+  name         String
+  role         UserRole   @default(ACCOUNTANT)
+  status       UserStatus @default(ACTIVE)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  school       School     @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+
+  @@unique([schoolId, email])
+  @@index([schoolId])
+  @@map("users")
+}
+
+// -------------------------------------------------------------
+// Academic Sessions / Years
+// -------------------------------------------------------------
+model AcademicYear {
+  id        String    @id @default(uuid())
+  schoolId  String
+  name      String    // e.g. "2026-2027"
+  startDate DateTime
+  endDate   DateTime
+  isCurrent Boolean   @default(false)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  school    School    @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  students  Student[]
+
+  @@unique([schoolId, name])
+  @@index([schoolId])
+  @@map("academic_years")
+}
+
+// -------------------------------------------------------------
+// Academic Grade / Class Structure
+// -------------------------------------------------------------
+model GradeClass {
+  id        String    @id @default(uuid())
+  schoolId  String
+  name      String    // e.g. "Grade 10"
+  code      String    // e.g. "G10"
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  school    School    @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  sections  Section[]
+  students  Student[]
+
+  @@unique([schoolId, code])
+  @@index([schoolId])
+  @@map("grade_classes")
+}
+
+// -------------------------------------------------------------
+// Class Sections
+// -------------------------------------------------------------
+model Section {
+  id        String     @id @default(uuid())
+  schoolId  String
+  gradeId   String
+  name      String     // e.g. "A"
+  capacity  Int        @default(40)
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  school    School     @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  grade     GradeClass @relation(fields: [gradeId], references: [id], onDelete: Cascade)
+  students  Student[]
+
+  @@unique([schoolId, gradeId, name])
+  @@index([schoolId])
+  @@index([gradeId])
+  @@map("sections")
+}
+
+// -------------------------------------------------------------
+// Student Profiles
+// -------------------------------------------------------------
+model Student {
+  id              String        @id @default(uuid())
+  schoolId        String
+  admissionNumber String
+  rollNumber      String?
+  firstName       String
+  lastName        String
+  dateOfBirth     DateTime?
+  guardianName    String?
+  guardianPhone   String?
+  guardianEmail   String?
+  gradeId         String
+  sectionId       String
+  academicYearId  String
+  status          StudentStatus @default(ACTIVE)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  school          School        @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  grade           GradeClass    @relation(fields: [gradeId], references: [id], onDelete: Cascade)
+  section         Section       @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  academicYear    AcademicYear  @relation(fields: [academicYearId], references: [id], onDelete: Cascade)
+
+  @@unique([schoolId, admissionNumber])
+  @@index([schoolId])
+  @@index([gradeId])
+  @@index([sectionId])
+  @@index([academicYearId])
+  @@map("students")
+}

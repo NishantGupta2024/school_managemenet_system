@@ -1,0 +1,30 @@
+{
+  "name": "school-fee-management-system",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Multi-tenant School Fee Management System",
+  "workspaces": [
+    "backend",
+    "frontend"
+  ],
+  "scripts": {
+    "dev:backend": "npm run start:dev --workspace=backend",
+    "dev:frontend": "npm run dev --workspace=frontend",
+    "build": "npm run build --workspaces",
+    "test": "npm run test --workspaces",
+    "lint": "npm run lint --workspaces",
+    "db:migrate": "npm run prisma:migrate --workspace=backend",
+    "db:seed": "npm run prisma:seed --workspace=backend",
+    "db:generate": "npm run prisma:generate --workspace=backend"
+  },
+  "keywords": [
+    "school-fee-management",
+    "multi-tenant",
+    "nestjs",
+    "react",
+    "prisma",
+    "postgresql"
+  ],
+  "author": "Engineering Team",
+  "license": "UNLICENSED"
+}
