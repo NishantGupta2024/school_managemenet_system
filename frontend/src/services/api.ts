@@ -307,6 +307,161 @@ export const metaApi = {
   },
 };
 
+// Phase 2C: Fee Generation & Statement Types
+export type InvoiceStatus = 'UPCOMING' | 'DUE' | 'OVERDUE' | 'VOID';
+
+export interface FeeInvoiceItem {
+  id: string;
+  feeHeadId: string;
+  feeHeadNameSnapshot: string;
+  billingFrequencySnapshot: FeeFrequency;
+  grossAmount: number;
+  discountAmount: number;
+  netAmount: number;
+  createdAt: string;
+}
+
+export interface FeeInvoice {
+  id: string;
+  schoolId: string;
+  studentId: string;
+  academicYearId: string;
+  billingMonth: number;
+  monthName: string;
+  dueDate: string;
+  grossAmount: number;
+  discountAmount: number;
+  netAmount: number;
+  status: InvoiceStatus;
+  storedStatus: InvoiceStatus;
+  generatedAt: string;
+  items: FeeInvoiceItem[];
+}
+
+export interface FeeGenerationPreview {
+  academicYearId: string;
+  gradeId?: string | null;
+  totalEligibleAllocations: number;
+  totalStudents: number;
+  totalPlannedInvoices: number;
+  newInvoicesToCreate: number;
+  existingInvoicesToSkip: number;
+  totalPlannedItems: number;
+  projectedGrossTotal: number;
+  projectedDiscountTotal: number;
+  projectedNetTotal: number;
+  validationErrors: string[];
+}
+
+export interface FeeGenerationExecution {
+  runId: string;
+  academicYearId: string;
+  gradeId?: string | null;
+  totalStudents: number;
+  totalInvoicesCreated: number;
+  totalInvoicesSkipped: number;
+  totalInvoicesFailed: number;
+  totalGrossAmount: number;
+  totalDiscountAmount: number;
+  totalNetAmount: number;
+  status: string;
+  executedAt: string;
+}
+
+export interface FeeGenerationRun {
+  id: string;
+  schoolId: string;
+  academicYearId: string;
+  gradeId?: string | null;
+  executedByUserId?: string | null;
+  totalStudents: number;
+  totalInvoicesCreated: number;
+  totalInvoicesSkipped: number;
+  totalGrossAmount: string | number;
+  totalDiscountAmount: string | number;
+  totalNetAmount: string | number;
+  status: string;
+  createdAt: string;
+  academicYear?: AcademicYear;
+  executedBy?: {
+    id: string;
+    name: string;
+    email: string;
+  } | null;
+}
+
+export interface StudentFeeStatement {
+  student: {
+    id: string;
+    admissionNumber: string;
+    firstName: string;
+    lastName: string;
+    fullName: string;
+    grade?: string;
+    section?: string;
+    status: string;
+    guardianName?: string;
+    guardianEmail?: string;
+    guardianPhone?: string;
+  };
+  academicYear: {
+    id: string;
+    name: string;
+    startDate: string;
+    endDate: string;
+  };
+  allocation: {
+    id: string;
+    feeStructureId: string;
+    feeStructureName: string;
+    concessionType: ConcessionType;
+    concessionValue: number;
+    startBillingMonth: number;
+    optedFeeHeadIds: string[];
+    status: string;
+  } | null;
+  summary: {
+    totalGrossAmount: number;
+    totalDiscountAmount: number;
+    totalNetAmount: number;
+    invoiceCount: number;
+    statusBreakdown: {
+      UPCOMING: number;
+      DUE: number;
+      OVERDUE: number;
+      VOID: number;
+    };
+  };
+  invoices: FeeInvoice[];
+}
+
+// Phase 2C APIs
+export const feeGenerationApi = {
+  preview: async (data: { academicYearId: string; gradeId?: string }) => {
+    const res = await api.post<FeeGenerationPreview>('/fee-generation/preview', data);
+    return res.data;
+  },
+  execute: async (data: { academicYearId: string; gradeId?: string }) => {
+    const res = await api.post<FeeGenerationExecution>('/fee-generation/execute', data);
+    return res.data;
+  },
+  getRuns: async (academicYearId?: string) => {
+    const res = await api.get<FeeGenerationRun[]>('/fee-generation/runs', {
+      params: academicYearId ? { academicYearId } : undefined,
+    });
+    return res.data;
+  },
+};
+
+export const feeStatementApi = {
+  getStatement: async (studentId: string, academicYearId?: string) => {
+    const res = await api.get<StudentFeeStatement>(`/students/${studentId}/fee-statement`, {
+      params: academicYearId ? { academicYearId } : undefined,
+    });
+    return res.data;
+  },
+};
+
 export const fetchSystemHealth = async (): Promise<HealthResponse> => {
   const response = await api.get<HealthResponse>('/health');
   return response.data;

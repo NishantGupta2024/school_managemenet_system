@@ -4,19 +4,28 @@ import { HealthStatus } from './components/HealthStatus';
 import { FeeHeadsView } from './components/FeeHeadsView';
 import { FeeStructuresView } from './components/FeeStructuresView';
 import { StudentAllocationsView } from './components/StudentAllocationsView';
+import { FeeGenerationView } from './components/FeeGenerationView';
+import { StudentStatementView } from './components/StudentStatementView';
 import {
   CheckCircle,
   Shield,
   Layers,
   Database,
   Lock,
-  ArrowRight,
   Activity,
   Tag,
   UserCheck,
+  Sparkles,
+  FileText,
 } from 'lucide-react';
 
-export type ActiveTab = 'overview' | 'fee-heads' | 'fee-structures' | 'student-allocations';
+export type ActiveTab =
+  | 'overview'
+  | 'fee-heads'
+  | 'fee-structures'
+  | 'student-allocations'
+  | 'fee-generation'
+  | 'student-statements';
 
 export const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<ActiveTab>('overview');
@@ -76,6 +85,30 @@ export const App: React.FC = () => {
               <UserCheck className="w-4 h-4" />
               Student Allocations
             </button>
+
+            <button
+              onClick={() => setActiveTab('fee-generation')}
+              className={`flex items-center gap-2 py-3 px-3.5 border-b-2 font-medium text-sm whitespace-nowrap transition-colors ${
+                activeTab === 'fee-generation'
+                  ? 'border-indigo-600 text-indigo-600 font-semibold'
+                  : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
+              }`}
+            >
+              <Sparkles className="w-4 h-4 text-indigo-500" />
+              Monthly Invoicing
+            </button>
+
+            <button
+              onClick={() => setActiveTab('student-statements')}
+              className={`flex items-center gap-2 py-3 px-3.5 border-b-2 font-medium text-sm whitespace-nowrap transition-colors ${
+                activeTab === 'student-statements'
+                  ? 'border-indigo-600 text-indigo-600 font-semibold'
+                  : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
+              }`}
+            >
+              <FileText className="w-4 h-4 text-emerald-500" />
+              Fee Statements
+            </button>
           </nav>
         </div>
       </div>
@@ -120,6 +153,20 @@ export const App: React.FC = () => {
                     <UserCheck className="w-3.5 h-3.5 text-indigo-200" />
                     Assign Students
                   </button>
+                  <button
+                    onClick={() => setActiveTab('fee-generation')}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold bg-indigo-500 hover:bg-indigo-400 text-white transition-colors"
+                  >
+                    <Sparkles className="w-3.5 h-3.5 text-white" />
+                    Generate Invoices
+                  </button>
+                  <button
+                    onClick={() => setActiveTab('student-statements')}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white transition-colors"
+                  >
+                    <FileText className="w-3.5 h-3.5 text-white" />
+                    Fee Statements
+                  </button>
                 </div>
               </div>
             </div>
@@ -129,11 +176,11 @@ export const App: React.FC = () => {
               <HealthStatus />
             </div>
 
-            {/* Phase 1 Verification Checklist */}
+            {/* Phase 1 & 2 Verification Checklist */}
             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
               <h3 className="text-base font-bold text-slate-900 mb-4 flex items-center gap-2">
                 <CheckCircle className="w-5 h-5 text-emerald-600" />
-                Phase 1 Foundation Deliverables
+                Phase Foundation & Fee Engine Deliverables
               </h3>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -166,21 +213,21 @@ export const App: React.FC = () => {
                     <Database className="w-5 h-5" />
                   </div>
                   <div>
-                    <h4 className="text-sm font-semibold text-slate-800">Prisma Multi-Tenant Models</h4>
+                    <h4 className="text-sm font-semibold text-slate-800">Fee Configuration Tier (Phase 2B)</h4>
                     <p className="text-xs text-slate-500 mt-0.5">
-                      PostgreSQL relational schema with <code className="font-mono">School</code>, <code className="font-mono">User</code>, <code className="font-mono">AcademicYear</code>, <code className="font-mono">GradeClass</code>, <code className="font-mono">Section</code>, <code className="font-mono">Student</code>.
+                      Master Fee Heads, Class Structures with frequencies (Monthly/Annual/One-Time), and Student Fee Allocations with exact concession semantics.
                     </p>
                   </div>
                 </div>
 
                 <div className="flex items-start gap-3 p-4 rounded-xl border border-slate-100 bg-slate-50/50">
                   <div className="p-2 rounded-lg bg-purple-50 text-purple-600">
-                    <ArrowRight className="w-5 h-5" />
+                    <Sparkles className="w-5 h-5" />
                   </div>
                   <div>
-                    <h4 className="text-sm font-semibold text-slate-800">Ready for Phase 2</h4>
+                    <h4 className="text-sm font-semibold text-slate-800">Monthly Invoicing Engine (Phase 2C)</h4>
                     <p className="text-xs text-slate-500 mt-0.5">
-                      Phase 2B Fee Configuration Module: Fee Heads, Class Structures, and Student Allocations.
+                      12-Month schedule generator (April–March), atomic generation with idempotency, dynamic status derivation, and itemized fee statements.
                     </p>
                   </div>
                 </div>
@@ -197,10 +244,16 @@ export const App: React.FC = () => {
 
         {/* Tab 4: Student Allocations */}
         {activeTab === 'student-allocations' && <StudentAllocationsView />}
+
+        {/* Tab 5: Monthly Fee Generation */}
+        {activeTab === 'fee-generation' && <FeeGenerationView />}
+
+        {/* Tab 6: Student Fee Statements */}
+        {activeTab === 'student-statements' && <StudentStatementView />}
       </main>
 
       <footer className="bg-white border-t border-slate-200 py-4 px-6 text-center text-xs text-slate-500">
-        School Fee Management System • Phase 2B Fee Configuration • Multi-Tenant Enterprise Architecture
+        School Fee Management System • Phase 2C Monthly Fee Generation Engine • Multi-Tenant Enterprise Architecture
       </footer>
     </div>
   );

@@ -9,6 +9,7 @@ import { StudentsModule } from './students/students.module';
 import { FeeHeadsModule } from './fee-heads/fee-heads.module';
 import { FeeStructuresModule } from './fee-structures/fee-structures.module';
 import { StudentAllocationsModule } from './student-allocations/student-allocations.module';
+import { FeeGenerationModule } from './fee-generation/fee-generation.module';
 
 @Module({
   imports: [
@@ -24,6 +25,7 @@ import { StudentAllocationsModule } from './student-allocations/student-allocati
     FeeHeadsModule,
     FeeStructuresModule,
     StudentAllocationsModule,
+    FeeGenerationModule,
   ],
 })
 export class AppModule implements NestModule {

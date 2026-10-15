@@ -69,6 +69,13 @@ enum AllocationStatus {
   INACTIVE
 }
 
+enum InvoiceStatus {
+  UPCOMING
+  DUE
+  OVERDUE
+  VOID
+}
+
 // -------------------------------------------------------------
 // Core Multi-Tenant Foundation: School / Tenant
 // -------------------------------------------------------------
@@ -95,6 +102,9 @@ model School {
   feeStructures         FeeStructure[]
   feeStructureItems     FeeStructureItem[]
   studentFeeAllocations StudentFeeAllocation[]
+  invoices              FeeInvoice[]
+  invoiceItems          InvoiceItem[]
+  feeGenerationRuns     FeeGenerationRun[]
 
   @@map("schools")
 }
@@ -115,6 +125,7 @@ model User {
 
   school                School?                @relation(fields: [schoolId], references: [id], onDelete: Cascade)
   authorizedAllocations StudentFeeAllocation[]
+  feeGenerationRuns     FeeGenerationRun[]
 
   @@unique([schoolId, email])
   @@index([schoolId])
@@ -138,6 +149,8 @@ model AcademicYear {
   students              Student[]
   feeStructures         FeeStructure[]
   studentFeeAllocations StudentFeeAllocation[]
+  invoices              FeeInvoice[]
+  feeGenerationRuns     FeeGenerationRun[]
 
   @@unique([schoolId, name])
   @@unique([schoolId, id]) // Required for composite foreign key constraint
@@ -208,6 +221,7 @@ model Student {
   gradeId         String
   sectionId       String
   academicYearId  String
+  admissionDate   DateTime?              // Mid-year admission date (if null, assumed beginning of session)
   status          StudentStatus          @default(ACTIVE)
   createdAt       DateTime               @default(now())
   updatedAt       DateTime               @updatedAt
@@ -218,6 +232,7 @@ model Student {
   section         Section                @relation(fields: [schoolId, sectionId], references: [schoolId, id], onDelete: Cascade)
   academicYear    AcademicYear           @relation(fields: [schoolId, academicYearId], references: [schoolId, id], onDelete: Cascade)
   feeAllocations  StudentFeeAllocation[]
+  invoices        FeeInvoice[]
 
   @@unique([schoolId, admissionNumber])
   @@unique([schoolId, id])
@@ -249,6 +264,7 @@ model FeeHead {
 
   school         School             @relation(fields: [schoolId], references: [id], onDelete: Cascade)
   structureItems FeeStructureItem[]
+  invoiceItems   InvoiceItem[]
 
   @@unique([schoolId, code])
   @@unique([schoolId, id])
@@ -332,6 +348,9 @@ model StudentFeeAllocation {
   // JSON Array of opted optional FeeHead IDs, e.g. ["fee-head-uuid-1"]
   optedFeeHeadIds    Json             @default("[]")
 
+  // Mid-year admission billing start: 1 = April, 2 = May, ... 12 = March
+  startBillingMonth  Int              @default(1)
+
   createdAt          DateTime         @default(now())
   updatedAt          DateTime         @updatedAt
 
@@ -349,3 +368,94 @@ model StudentFeeAllocation {
   @@index([academicYearId])
   @@map("student_fee_allocations")
 }
+
+// =============================================================
+// PHASE 2C: MONTHLY FEE GENERATION & INVOICE TIER
+// =============================================================
+
+// -------------------------------------------------------------
+// Fee Invoice: Monthly Student Fee Obligation
+// -------------------------------------------------------------
+model FeeInvoice {
+  id             String        @id @default(uuid())
+  schoolId       String
+  studentId      String
+  academicYearId String
+  billingMonth   Int           // 1–12, where 1 = April, 12 = March
+  dueDate        DateTime
+  grossAmount    Decimal       @db.Decimal(12, 2)
+  discountAmount Decimal       @db.Decimal(12, 2)
+  netAmount      Decimal       @db.Decimal(12, 2)
+  status         InvoiceStatus @default(UPCOMING)
+  generatedAt    DateTime      @default(now())
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  school         School        @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  student        Student       @relation(fields: [schoolId, studentId], references: [schoolId, id], onDelete: Cascade)
+  academicYear   AcademicYear  @relation(fields: [schoolId, academicYearId], references: [schoolId, id], onDelete: Cascade)
+  items          InvoiceItem[]
+
+  @@unique([schoolId, studentId, academicYearId, billingMonth])
+  @@unique([schoolId, id])
+  @@index([schoolId])
+  @@index([studentId])
+  @@index([academicYearId])
+  @@index([billingMonth])
+  @@index([status])
+  @@map("fee_invoices")
+}
+
+// -------------------------------------------------------------
+// Invoice Item: Line-Item Snapshot within Monthly Invoice
+// -------------------------------------------------------------
+model InvoiceItem {
+  id                       String       @id @default(uuid())
+  schoolId                 String
+  invoiceId                String
+  feeHeadId                String
+  feeHeadNameSnapshot      String
+  grossAmount              Decimal      @db.Decimal(12, 2)
+  discountAmount           Decimal      @db.Decimal(12, 2)
+  netAmount                Decimal      @db.Decimal(12, 2)
+  billingFrequencySnapshot  FeeFrequency
+  createdAt                DateTime     @default(now())
+
+  school   School     @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  invoice  FeeInvoice @relation(fields: [schoolId, invoiceId], references: [schoolId, id], onDelete: Cascade)
+  feeHead  FeeHead    @relation(fields: [schoolId, feeHeadId], references: [schoolId, id], onDelete: Restrict)
+
+  @@unique([schoolId, id])
+  @@index([schoolId])
+  @@index([invoiceId])
+  @@index([feeHeadId])
+  @@map("invoice_items")
+}
+
+// -------------------------------------------------------------
+// Fee Generation Run: Traceable Batch Audit History
+// -------------------------------------------------------------
+model FeeGenerationRun {
+  id                   String       @id @default(uuid())
+  schoolId             String
+  academicYearId       String
+  gradeId              String?
+  executedByUserId     String?
+  totalStudents        Int
+  totalInvoicesCreated Int
+  totalInvoicesSkipped Int
+  totalGrossAmount     Decimal      @db.Decimal(12, 2)
+  totalDiscountAmount  Decimal      @db.Decimal(12, 2)
+  totalNetAmount       Decimal      @db.Decimal(12, 2)
+  status               String       @default("COMPLETED")
+  createdAt            DateTime     @default(now())
+
+  school       School       @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  academicYear AcademicYear @relation(fields: [schoolId, academicYearId], references: [schoolId, id], onDelete: Cascade)
+  executedBy   User?        @relation(fields: [executedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([schoolId])
+  @@index([academicYearId])
+  @@map("fee_generation_runs")
+}
+

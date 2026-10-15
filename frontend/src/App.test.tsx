@@ -89,9 +89,65 @@ vi.mock('./services/api', () => ({
     delete: vi.fn(),
   },
   metaApi: {
-    getStudents: vi.fn().mockResolvedValue([]),
+    getStudents: vi.fn().mockResolvedValue([
+      {
+        id: 'stud-1',
+        admissionNumber: 'ADM-2026-001',
+        firstName: 'Aarav',
+        lastName: 'Sharma',
+        grade: { name: 'Grade 10' },
+      },
+    ]),
     getGrades: vi.fn().mockResolvedValue([{ id: 'g10', name: 'Grade 10', code: 'G10' }]),
     getAcademicYears: vi.fn().mockResolvedValue([{ id: 'y26', name: '2026-2027', isCurrent: true }]),
+  },
+  feeGenerationApi: {
+    preview: vi.fn().mockResolvedValue({
+      academicYearId: 'y26',
+      totalEligibleAllocations: 1,
+      totalStudents: 1,
+      totalPlannedInvoices: 12,
+      newInvoicesToCreate: 12,
+      existingInvoicesToSkip: 0,
+      totalPlannedItems: 24,
+      projectedGrossTotal: 80500,
+      projectedDiscountTotal: 8050,
+      projectedNetTotal: 72450,
+      validationErrors: [],
+    }),
+    execute: vi.fn(),
+    getRuns: vi.fn().mockResolvedValue([]),
+  },
+  feeStatementApi: {
+    getStatement: vi.fn().mockResolvedValue({
+      student: {
+        id: 'stud-1',
+        admissionNumber: 'ADM-2026-001',
+        firstName: 'Aarav',
+        lastName: 'Sharma',
+        fullName: 'Aarav Sharma',
+        grade: 'Grade 10',
+        section: 'Section A',
+        status: 'ACTIVE',
+      },
+      academicYear: {
+        id: 'y26',
+        name: '2026-2027',
+      },
+      allocation: {
+        feeStructureName: 'Grade 10 Standard Fee',
+        concessionType: 'PERCENTAGE',
+        concessionValue: 10,
+      },
+      summary: {
+        totalGrossAmount: 80500,
+        totalDiscountAmount: 8050,
+        totalNetAmount: 72450,
+        invoiceCount: 12,
+        statusBreakdown: { UPCOMING: 12, DUE: 0, OVERDUE: 0, VOID: 0 },
+      },
+      invoices: [],
+    }),
   },
 }));
 
@@ -118,13 +174,13 @@ describe('App Component', () => {
     });
   });
 
-  it('renders Phase 1 Foundation deliverables checklist', async () => {
+  it('renders Phase Foundation deliverables checklist', async () => {
     render(<App />);
-    expect(screen.getByText(/Phase 1 Foundation Deliverables/i)).toBeInTheDocument();
+    expect(screen.getByText(/Phase Foundation & Fee Engine Deliverables/i)).toBeInTheDocument();
     expect(screen.getByText(/Clean Monorepo Workspace/i)).toBeInTheDocument();
     expect(screen.getByText(/Tenant Context Isolation/i)).toBeInTheDocument();
     await waitFor(() => {
-      expect(screen.getByText(/Ready for Phase 2/i)).toBeInTheDocument();
+      expect(screen.getByText(/Monthly Invoicing Engine \(Phase 2C\)/i)).toBeInTheDocument();
     });
   });
 
@@ -160,6 +216,28 @@ describe('App Component', () => {
       expect(screen.getByText(/Student Fee Allocations/i)).toBeInTheDocument();
       expect(screen.getByText(/Aarav Sharma/i)).toBeInTheDocument();
       expect(screen.getByText('ADM-2026-001')).toBeInTheDocument();
+    });
+  });
+
+  it('navigates to Monthly Invoicing tab when clicked', async () => {
+    render(<App />);
+    const tabBtns = screen.getAllByRole('button', { name: /Monthly Invoicing/i });
+    fireEvent.click(tabBtns[0]);
+
+    await waitFor(() => {
+      expect(screen.getByText(/Monthly Invoicing & Schedule Generator/i)).toBeInTheDocument();
+      expect(screen.getByText(/Generation Audit Log & History/i)).toBeInTheDocument();
+    });
+  });
+
+  it('navigates to Fee Statements tab when clicked', async () => {
+    render(<App />);
+    const tabBtns = screen.getAllByRole('button', { name: /Fee Statements/i });
+    fireEvent.click(tabBtns[0]);
+
+    await waitFor(() => {
+      expect(screen.getByText(/Student Fee Statements/i)).toBeInTheDocument();
+      expect(screen.getByText(/Monthly Fee Obligation Schedule/i)).toBeInTheDocument();
     });
   });
 });
