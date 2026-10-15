@@ -4,6 +4,7 @@ import { PrismaModule } from './prisma/prisma.module';
 import { TenantModule } from './common/tenant/tenant.module';
 import { TenantMiddleware } from './common/tenant/tenant.middleware';
 import { HealthModule } from './health/health.module';
+import { AuthModule } from './auth/auth.module';
 import { StudentsModule } from './students/students.module';
 
 @Module({
@@ -14,6 +15,7 @@ import { StudentsModule } from './students/students.module';
     }),
     PrismaModule,
     TenantModule,
+    AuthModule,
     HealthModule,
     StudentsModule,
   ],

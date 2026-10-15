@@ -1,9 +1,12 @@
 import { PrismaClient, TenantStatus, UserRole, UserStatus, StudentStatus } from '@prisma/client';
+import * as bcrypt from 'bcrypt';
 
 const prisma = new PrismaClient();
 
 async function main() {
-  console.log('Seeding Phase 1 baseline multi-tenant foundation...');
+  console.log('Seeding Phase 1 baseline multi-tenant foundation with real bcrypt credentials...');
+
+  const passwordHash = await bcrypt.hash('Password123!', 10);
 
   const schoolAId = '00000000-0000-0000-0000-000000000001';
   const schoolBId = '00000000-0000-0000-0000-000000000002';
@@ -27,7 +30,7 @@ async function main() {
   });
   console.log(`Seeded School A: ${schoolA.name} (${schoolA.code})`);
 
-  // 2. Create Baseline School Beta (Starlight Valley School) for cross-tenant testing
+  // 2. Create Baseline School Beta (Starlight Valley School)
   const schoolB = await prisma.school.upsert({
     where: { code: 'SCH002' },
     update: {},
@@ -46,27 +49,32 @@ async function main() {
   });
   console.log(`Seeded School B: ${schoolB.name} (${schoolB.code})`);
 
-  // 3. Create Platform Super Admin (Cross-School / Global)
-  const platformAdmin = await prisma.user.upsert({
-    where: {
-      schoolId_email: {
-        schoolId: '',
-        email: 'superadmin@fee-platform.com',
-      },
-    },
-    update: {},
-    create: {
-      schoolId: null,
-      email: 'superadmin@fee-platform.com',
-      name: 'System Super Admin',
-      passwordHash: '$2b$10$EpRnTzVlqHNP0.fUbXUwSO9wB51J4GzT/qC27.h19O5vY3Keq8Zg.',
-      role: UserRole.PLATFORM_SUPER_ADMIN,
-      status: UserStatus.ACTIVE,
-    },
-  }).catch(() => null); // If null constraint on schoolId unique
-  if (platformAdmin) console.log(`Seeded Platform Admin: ${platformAdmin.name}`);
+  // 3. Platform Super Admin (Cross-School / Global)
+  const existingPlatformAdmin = await prisma.user.findFirst({
+    where: { email: 'superadmin@fee-platform.com' },
+  });
 
-  // 4. Create School A Admin & Staff
+  let platformAdmin;
+  if (existingPlatformAdmin) {
+    platformAdmin = await prisma.user.update({
+      where: { id: existingPlatformAdmin.id },
+      data: { passwordHash, role: UserRole.PLATFORM_SUPER_ADMIN },
+    });
+  } else {
+    platformAdmin = await prisma.user.create({
+      data: {
+        schoolId: null,
+        email: 'superadmin@fee-platform.com',
+        name: 'System Super Admin',
+        passwordHash,
+        role: UserRole.PLATFORM_SUPER_ADMIN,
+        status: UserStatus.ACTIVE,
+      },
+    });
+  }
+  console.log(`Seeded Platform Admin: ${platformAdmin.name}`);
+
+  // 4. School A Admin
   const adminA = await prisma.user.upsert({
     where: {
       schoolId_email: {
@@ -74,19 +82,59 @@ async function main() {
         email: 'admin@greenwood.edu',
       },
     },
-    update: { role: UserRole.SCHOOL_ADMIN },
+    update: { passwordHash, role: UserRole.SCHOOL_ADMIN },
     create: {
       schoolId: schoolA.id,
       email: 'admin@greenwood.edu',
       name: 'Dr. Jane Sterling',
-      passwordHash: '$2b$10$EpRnTzVlqHNP0.fUbXUwSO9wB51J4GzT/qC27.h19O5vY3Keq8Zg.',
+      passwordHash,
       role: UserRole.SCHOOL_ADMIN,
       status: UserStatus.ACTIVE,
     },
   });
   console.log(`Seeded School A Admin: ${adminA.name} [${adminA.role}]`);
 
-  // 5. Create School B Admin
+  // 5. School A Fee Staff
+  const staffA = await prisma.user.upsert({
+    where: {
+      schoolId_email: {
+        schoolId: schoolA.id,
+        email: 'staff@greenwood.edu',
+      },
+    },
+    update: { passwordHash, role: UserRole.FEE_STAFF },
+    create: {
+      schoolId: schoolA.id,
+      email: 'staff@greenwood.edu',
+      name: 'Marcus Vance',
+      passwordHash,
+      role: UserRole.FEE_STAFF,
+      status: UserStatus.ACTIVE,
+    },
+  });
+  console.log(`Seeded School A Staff: ${staffA.name} [${staffA.role}]`);
+
+  // 6. School A Student User
+  const studentUserA = await prisma.user.upsert({
+    where: {
+      schoolId_email: {
+        schoolId: schoolA.id,
+        email: 'student@greenwood.edu',
+      },
+    },
+    update: { passwordHash, role: UserRole.STUDENT },
+    create: {
+      schoolId: schoolA.id,
+      email: 'student@greenwood.edu',
+      name: 'Aarav Sharma (Student)',
+      passwordHash,
+      role: UserRole.STUDENT,
+      status: UserStatus.ACTIVE,
+    },
+  });
+  console.log(`Seeded School A Student User: ${studentUserA.name} [${studentUserA.role}]`);
+
+  // 7. School B Admin
   const adminB = await prisma.user.upsert({
     where: {
       schoolId_email: {
@@ -94,19 +142,19 @@ async function main() {
         email: 'admin@starlight.edu',
       },
     },
-    update: { role: UserRole.SCHOOL_ADMIN },
+    update: { passwordHash, role: UserRole.SCHOOL_ADMIN },
     create: {
       schoolId: schoolB.id,
       email: 'admin@starlight.edu',
       name: 'Principal Robert Fox',
-      passwordHash: '$2b$10$EpRnTzVlqHNP0.fUbXUwSO9wB51J4GzT/qC27.h19O5vY3Keq8Zg.',
+      passwordHash,
       role: UserRole.SCHOOL_ADMIN,
       status: UserStatus.ACTIVE,
     },
   });
   console.log(`Seeded School B Admin: ${adminB.name} [${adminB.role}]`);
 
-  // 6. Academic Sessions
+  // 8. Academic Sessions
   const sessionA = await prisma.academicYear.upsert({
     where: {
       schoolId_name: {
@@ -141,7 +189,7 @@ async function main() {
     },
   });
 
-  // 7. Grades & Sections for School A
+  // 9. Grades & Sections for School A
   const grade10A = await prisma.gradeClass.upsert({
     where: {
       schoolId_code: {
@@ -174,7 +222,7 @@ async function main() {
     },
   });
 
-  // 8. Grades & Sections for School B
+  // 10. Grades & Sections for School B
   const grade10B = await prisma.gradeClass.upsert({
     where: {
       schoolId_code: {
@@ -207,7 +255,7 @@ async function main() {
     },
   });
 
-  // 9. Student for School A
+  // 11. Student for School A
   const studentA = await prisma.student.upsert({
     where: {
       schoolId_admissionNumber: {
@@ -231,9 +279,9 @@ async function main() {
       status: StudentStatus.ACTIVE,
     },
   });
-  console.log(`Seeded Student A in School A: ${studentA.firstName} ${studentA.lastName} (${studentA.admissionNumber})`);
+  console.log(`Seeded Student A: ${studentA.firstName} ${studentA.lastName} (${studentA.admissionNumber})`);
 
-  // 10. Student for School B
+  // 12. Student for School B
   const studentB = await prisma.student.upsert({
     where: {
       schoolId_admissionNumber: {
@@ -257,9 +305,9 @@ async function main() {
       status: StudentStatus.ACTIVE,
     },
   });
-  console.log(`Seeded Student B in School B: ${studentB.firstName} ${studentB.lastName} (${studentB.admissionNumber})`);
+  console.log(`Seeded Student B: ${studentB.firstName} ${studentB.lastName} (${studentB.admissionNumber})`);
 
-  console.log('Phase 1 enhanced multi-tenant seed completed.');
+  console.log('Seed completed with real bcrypt credentials.');
 }
 
 main()

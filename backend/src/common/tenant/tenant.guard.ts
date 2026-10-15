@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 import { TenantContextService } from './tenant-context.service';
 import { PrismaService } from '../../prisma/prisma.service';
+import { UserRole } from '@prisma/client';
 
 @Injectable()
 export class TenantGuard implements CanActivate {
@@ -18,23 +19,55 @@ export class TenantGuard implements CanActivate {
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest();
-    const schoolId = this.tenantContextService.getSchoolId();
+    const user = request.user;
 
-    if (!schoolId) {
+    // Server-validated authentication is required on tenant-protected resources
+    if (!user) {
       throw new UnauthorizedException(
-        'Tenant context missing: Request must specify target school identity via x-school-id header or authenticated session',
+        'Authentication required: Valid credentials must be established before tenant access',
       );
     }
 
-    // Basic UUID validation pattern
+    // Read client-supplied x-school-id header (hint/selector only)
+    const rawHeaderSchoolId = request.headers['x-school-id'] as string;
+    const headerSchoolId = rawHeaderSchoolId?.trim() || undefined;
+
+    let targetSchoolId: string;
+
+    if (user.role === UserRole.PLATFORM_SUPER_ADMIN) {
+      // Platform Super Admin must supply x-school-id to specify target school
+      if (!headerSchoolId) {
+        throw new BadRequestException(
+          'Tenant specification required: Platform admin must provide x-school-id header to target a specific school',
+        );
+      }
+      targetSchoolId = headerSchoolId;
+    } else {
+      // Normal School Staff / Student / Parent:
+      // School identity is strictly derived from user's trusted server-validated membership
+      if (!user.schoolId) {
+        throw new ForbiddenException('User is not associated with any active school');
+      }
+
+      // If client supplied a header, it must strictly match their membership
+      if (headerSchoolId && headerSchoolId !== user.schoolId) {
+        throw new ForbiddenException(
+          'Cross-tenant access forbidden: User membership does not match requested school',
+        );
+      }
+
+      targetSchoolId = user.schoolId;
+    }
+
+    // Basic UUID validation
     const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-    if (!uuidRegex.test(schoolId)) {
+    if (!uuidRegex.test(targetSchoolId)) {
       throw new BadRequestException('Malformed tenant ID: Must be a valid UUID');
     }
 
     // Verify tenant exists and is ACTIVE in database
     const school = await this.prisma.school.findUnique({
-      where: { id: schoolId },
+      where: { id: targetSchoolId },
     });
 
     if (!school) {
@@ -45,19 +78,17 @@ export class TenantGuard implements CanActivate {
       throw new ForbiddenException(`School tenant is currently ${school.status}`);
     }
 
-    // Authenticated membership enforcement:
-    // If request has authenticated user, ensure they belong to this school (or are PLATFORM_SUPER_ADMIN)
-    const user = request.user;
-    if (user) {
-      if (user.role !== 'PLATFORM_SUPER_ADMIN' && user.schoolId !== schoolId) {
-        throw new ForbiddenException(
-          'Cross-tenant access forbidden: User membership does not match target school',
-        );
-      }
-    }
-
-    // Attach validated school entity to request object
+    // Attach validated school entity to request object and update tenant context
     request.school = school;
+    this.tenantContextService.run(
+      {
+        schoolId: targetSchoolId,
+        userId: user.id,
+        userRole: user.role,
+      },
+      () => {},
+    );
+
     return true;
   }
 }

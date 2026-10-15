@@ -1,8 +1,11 @@
+-- CreateSchema
+CREATE SCHEMA IF NOT EXISTS "public";
+
 -- CreateEnum
 CREATE TYPE "TenantStatus" AS ENUM ('ACTIVE', 'INACTIVE', 'SUSPENDED');
 
 -- CreateEnum
-CREATE TYPE "UserRole" AS ENUM ('SUPER_ADMIN', 'SCHOOL_ADMIN', 'ACCOUNTANT', 'CASHIER', 'AUDITOR');
+CREATE TYPE "UserRole" AS ENUM ('PLATFORM_SUPER_ADMIN', 'SCHOOL_ADMIN', 'FEE_STAFF', 'STUDENT', 'PARENT');
 
 -- CreateEnum
 CREATE TYPE "UserStatus" AS ENUM ('ACTIVE', 'INACTIVE');
@@ -31,11 +34,11 @@ CREATE TABLE "schools" (
 -- CreateTable
 CREATE TABLE "users" (
     "id" TEXT NOT NULL,
-    "schoolId" TEXT NOT NULL,
+    "schoolId" TEXT,
     "email" TEXT NOT NULL,
     "passwordHash" TEXT NOT NULL,
     "name" TEXT NOT NULL,
-    "role" "UserRole" NOT NULL DEFAULT 'ACCOUNTANT',
+    "role" "UserRole" NOT NULL DEFAULT 'FEE_STAFF',
     "status" "UserStatus" NOT NULL DEFAULT 'ACTIVE',
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
@@ -120,10 +123,16 @@ CREATE INDEX "academic_years_schoolId_idx" ON "academic_years"("schoolId");
 CREATE UNIQUE INDEX "academic_years_schoolId_name_key" ON "academic_years"("schoolId", "name");
 
 -- CreateIndex
+CREATE UNIQUE INDEX "academic_years_schoolId_id_key" ON "academic_years"("schoolId", "id");
+
+-- CreateIndex
 CREATE INDEX "grade_classes_schoolId_idx" ON "grade_classes"("schoolId");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "grade_classes_schoolId_code_key" ON "grade_classes"("schoolId", "code");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "grade_classes_schoolId_id_key" ON "grade_classes"("schoolId", "id");
 
 -- CreateIndex
 CREATE INDEX "sections_schoolId_idx" ON "sections"("schoolId");
@@ -133,6 +142,9 @@ CREATE INDEX "sections_gradeId_idx" ON "sections"("gradeId");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "sections_schoolId_gradeId_name_key" ON "sections"("schoolId", "gradeId", "name");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "sections_schoolId_id_key" ON "sections"("schoolId", "id");
 
 -- CreateIndex
 CREATE INDEX "students_schoolId_idx" ON "students"("schoolId");
@@ -149,6 +161,9 @@ CREATE INDEX "students_academicYearId_idx" ON "students"("academicYearId");
 -- CreateIndex
 CREATE UNIQUE INDEX "students_schoolId_admissionNumber_key" ON "students"("schoolId", "admissionNumber");
 
+-- CreateIndex
+CREATE UNIQUE INDEX "students_schoolId_id_key" ON "students"("schoolId", "id");
+
 -- AddForeignKey
 ALTER TABLE "users" ADD CONSTRAINT "users_schoolId_fkey" FOREIGN KEY ("schoolId") REFERENCES "schools"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
@@ -162,16 +177,16 @@ ALTER TABLE "grade_classes" ADD CONSTRAINT "grade_classes_schoolId_fkey" FOREIGN
 ALTER TABLE "sections" ADD CONSTRAINT "sections_schoolId_fkey" FOREIGN KEY ("schoolId") REFERENCES "schools"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "sections" ADD CONSTRAINT "sections_gradeId_fkey" FOREIGN KEY ("gradeId") REFERENCES "grade_classes"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "sections" ADD CONSTRAINT "sections_schoolId_gradeId_fkey" FOREIGN KEY ("schoolId", "gradeId") REFERENCES "grade_classes"("schoolId", "id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "students" ADD CONSTRAINT "students_schoolId_fkey" FOREIGN KEY ("schoolId") REFERENCES "schools"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "students" ADD CONSTRAINT "students_gradeId_fkey" FOREIGN KEY ("gradeId") REFERENCES "grade_classes"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "students" ADD CONSTRAINT "students_schoolId_gradeId_fkey" FOREIGN KEY ("schoolId", "gradeId") REFERENCES "grade_classes"("schoolId", "id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "students" ADD CONSTRAINT "students_sectionId_fkey" FOREIGN KEY ("sectionId") REFERENCES "sections"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "students" ADD CONSTRAINT "students_schoolId_sectionId_fkey" FOREIGN KEY ("schoolId", "sectionId") REFERENCES "sections"("schoolId", "id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "students" ADD CONSTRAINT "students_academicYearId_fkey" FOREIGN KEY ("academicYearId") REFERENCES "academic_years"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "students" ADD CONSTRAINT "students_schoolId_academicYearId_fkey" FOREIGN KEY ("schoolId", "academicYearId") REFERENCES "academic_years"("schoolId", "id") ON DELETE CASCADE ON UPDATE CASCADE;

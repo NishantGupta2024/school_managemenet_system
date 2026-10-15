@@ -1,16 +1,11 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { TenantContextService } from '../common/tenant/tenant-context.service';
 
 @Injectable()
 export class StudentsService {
-  constructor(
-    private readonly prisma: PrismaService,
-    private readonly tenantContext: TenantContextService,
-  ) {}
+  constructor(private readonly prisma: PrismaService) {}
 
-  async findAll() {
-    const schoolId = this.tenantContext.getSchoolId()!;
+  async findAllForSchool(schoolId: string) {
     return this.prisma.student.findMany({
       where: { schoolId },
       include: {
@@ -22,9 +17,8 @@ export class StudentsService {
     });
   }
 
-  async findOne(id: string) {
-    const schoolId = this.tenantContext.getSchoolId()!;
-    // Note: Always partition by [schoolId, id]
+  async findOneForSchool(schoolId: string, id: string) {
+    // Strictly partition by composite unique key [schoolId, id]
     const student = await this.prisma.student.findUnique({
       where: {
         schoolId_id: {
