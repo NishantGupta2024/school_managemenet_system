@@ -487,6 +487,106 @@ describe('Phase 2B: Fee Configuration Module (e2e)', () => {
       expect(hasStructureA).toBe(false);
     });
 
+    it('rejects School A Admin attempting to read, update, or delete School B fee head by ID (404 Not Found)', async () => {
+      // Create a fee head directly in School B
+      const headB = await prisma.feeHead.create({
+        data: {
+          schoolId: schoolBId,
+          name: 'School B Private Head',
+          code: 'SCHB_PRIV',
+          category: FeeHeadCategory.ACADEMIC,
+        },
+      });
+
+      try {
+        // Direct read attempt
+        await request(app.getHttpServer())
+          .get(`/api/v1/fee-heads/${headB.id}`)
+          .set('Authorization', `Bearer ${tokenSchoolAAdmin}`)
+          .expect(404);
+
+        // Direct update attempt
+        await request(app.getHttpServer())
+          .patch(`/api/v1/fee-heads/${headB.id}`)
+          .set('Authorization', `Bearer ${tokenSchoolAAdmin}`)
+          .send({ name: 'Tampered Head' })
+          .expect(404);
+
+        // Direct delete attempt
+        await request(app.getHttpServer())
+          .delete(`/api/v1/fee-heads/${headB.id}`)
+          .set('Authorization', `Bearer ${tokenSchoolAAdmin}`)
+          .expect(404);
+      } finally {
+        await prisma.feeHead.deleteMany({ where: { id: headB.id } });
+      }
+    });
+
+    it('rejects School A Admin attempting to read, update, or delete School B fee structure by ID (404 Not Found)', async () => {
+      // Create a structure directly in School B
+      const headB = await prisma.feeHead.create({
+        data: {
+          schoolId: schoolBId,
+          name: 'School B Tuition',
+          code: 'SCHB_TUIT',
+          category: FeeHeadCategory.ACADEMIC,
+        },
+      });
+
+      const structB = await prisma.feeStructure.create({
+        data: {
+          schoolId: schoolBId,
+          academicYearId: sessionBId,
+          gradeId: gradeBId,
+          name: 'School B Exclusive Structure',
+          items: {
+            create: [
+              {
+                feeHeadId: headB.id,
+                amount: 3000.0,
+                frequency: FeeFrequency.MONTHLY,
+              },
+            ],
+          },
+        },
+      });
+
+      try {
+        // Direct read
+        await request(app.getHttpServer())
+          .get(`/api/v1/fee-structures/${structB.id}`)
+          .set('Authorization', `Bearer ${tokenSchoolAAdmin}`)
+          .expect(404);
+
+        // Direct update
+        await request(app.getHttpServer())
+          .patch(`/api/v1/fee-structures/${structB.id}`)
+          .set('Authorization', `Bearer ${tokenSchoolAAdmin}`)
+          .send({ name: 'Tampered Structure' })
+          .expect(404);
+
+        // Direct delete
+        await request(app.getHttpServer())
+          .delete(`/api/v1/fee-structures/${structB.id}`)
+          .set('Authorization', `Bearer ${tokenSchoolAAdmin}`)
+          .expect(404);
+      } finally {
+        await prisma.feeStructureItem.deleteMany({ where: { feeStructureId: structB.id } });
+        await prisma.feeStructure.deleteMany({ where: { id: structB.id } });
+        await prisma.feeHead.deleteMany({ where: { id: headB.id } });
+      }
+    });
+
+    it('requires PLATFORM_SUPER_ADMIN to provide x-school-id header (400 Bad Request if missing)', async () => {
+      const res = await request(app.getHttpServer())
+        .get('/api/v1/fee-heads')
+        .set('Authorization', `Bearer ${tokenPlatformAdmin}`)
+        // Intentionally missing x-school-id header
+        .expect(400);
+
+      expect(res.body.message).toContain('Tenant specification required');
+    });
+
     it('allows PLATFORM_SUPER_ADMIN to query configurations of School A with x-school-id header', async () => {
       const res = await request(app.getHttpServer())
         .get('/api/v1/fee-heads')
@@ -496,6 +596,130 @@ describe('Phase 2B: Fee Configuration Module (e2e)', () => {
 
       expect(Array.isArray(res.body)).toBe(true);
       expect(res.body.some((h: any) => h.id === tuitionHeadAId)).toBe(true);
+    });
+  });
+
+  describe('5. Financial Precision & Exact Boundary Calculations', () => {
+    it('supports exact fractional monetary amounts (Decimal 12,2)', async () => {
+      const fractionalHead = await request(app.getHttpServer())
+        .post('/api/v1/fee-heads')
+        .set('Authorization', `Bearer ${tokenSchoolAAdmin}`)
+        .send({
+          name: 'Fractional Lab Charge',
+          code: 'FRACT_LAB',
+          category: FeeHeadCategory.ACADEMIC,
+        })
+        .expect(201);
+
+      const fractionalStruct = await request(app.getHttpServer())
+        .post('/api/v1/fee-structures')
+        .set('Authorization', `Bearer ${tokenSchoolAAdmin}`)
+        .send({
+          academicYearId: sessionAId,
+          gradeId: gradeAId,
+          name: 'Grade 10 Fractional Structure',
+          items: [
+            {
+              feeHeadId: fractionalHead.body.id,
+              amount: 2500.75, // Fractional amount
+              frequency: FeeFrequency.MONTHLY,
+            },
+          ],
+        })
+        .expect(201);
+
+      expect(Number(fractionalStruct.body.items[0].amount)).toBe(2500.75);
+
+      // Clean up
+      await prisma.feeStructureItem.deleteMany({ where: { feeStructureId: fractionalStruct.body.id } });
+      await prisma.feeStructure.delete({ where: { id: fractionalStruct.body.id } });
+      await prisma.feeHead.delete({ where: { id: fractionalHead.body.id } });
+    });
+
+    it('permits maximum 100% percentage concession (full scholarship)', async () => {
+      const studentTemp = await prisma.student.create({
+        data: {
+          schoolId: schoolAId,
+          admissionNumber: 'ADM-TEMP-SCHOLAR',
+          firstName: 'Scholar',
+          lastName: 'Student',
+          gradeId: gradeAId,
+          sectionId: (await prisma.section.findFirst({ where: { schoolId: schoolAId } }))!.id,
+          academicYearId: sessionAId,
+        },
+      });
+
+      try {
+        const res = await request(app.getHttpServer())
+          .post('/api/v1/student-allocations')
+          .set('Authorization', `Bearer ${tokenSchoolAAdmin}`)
+          .send({
+            studentId: studentTemp.id,
+            feeStructureId: structureAId,
+            academicYearId: sessionAId,
+            concessionType: ConcessionType.PERCENTAGE,
+            concessionValue: 100.0, // Exact 100% full scholarship
+            concessionReason: 'Government merit full-ride scholarship',
+          })
+          .expect(201);
+
+        expect(Number(res.body.concessionValue)).toBe(100.0);
+        expect(res.body.concessionType).toBe(ConcessionType.PERCENTAGE);
+      } finally {
+        await prisma.studentFeeAllocation.deleteMany({ where: { studentId: studentTemp.id } });
+        await prisma.student.delete({ where: { id: studentTemp.id } });
+      }
+    });
+
+    it('permits flat discount exactly equal to total base fee and rejects exceeding by 0.01', async () => {
+      const studentTemp = await prisma.student.create({
+        data: {
+          schoolId: schoolAId,
+          admissionNumber: 'ADM-TEMP-FLAT',
+          firstName: 'Flat',
+          lastName: 'Student',
+          gradeId: gradeAId,
+          sectionId: (await prisma.section.findFirst({ where: { schoolId: schoolAId } }))!.id,
+          academicYearId: sessionAId,
+        },
+      });
+
+      // Total base fee of structureAId without optional transport:
+      // (2500 * 12) + 5000 = 35000.00
+      try {
+        // Exceeding by 0.01 should fail
+        await request(app.getHttpServer())
+          .post('/api/v1/student-allocations')
+          .set('Authorization', `Bearer ${tokenSchoolAAdmin}`)
+          .send({
+            studentId: studentTemp.id,
+            feeStructureId: structureAId,
+            academicYearId: sessionAId,
+            concessionType: ConcessionType.FLAT_DISCOUNT,
+            concessionValue: 35000.01, // 1 cent over base fee
+            concessionReason: 'Over-limit concession attempt',
+          })
+          .expect(400);
+
+        // Exact 100% flat discount (35000.00) should succeed
+        const res = await request(app.getHttpServer())
+          .post('/api/v1/student-allocations')
+          .set('Authorization', `Bearer ${tokenSchoolAAdmin}`)
+          .send({
+            studentId: studentTemp.id,
+            feeStructureId: structureAId,
+            academicYearId: sessionAId,
+            concessionType: ConcessionType.FLAT_DISCOUNT,
+            concessionValue: 35000.0, // Exact limit
+            concessionReason: 'Full annual waiver approved by board',
+          })
+          .expect(201);
+
+        expect(Number(res.body.concessionValue)).toBe(35000.0);
+      } finally {
+        await prisma.studentFeeAllocation.deleteMany({ where: { studentId: studentTemp.id } });
+        await prisma.student.delete({ where: { id: studentTemp.id } });
+      }
     });
   });
 });

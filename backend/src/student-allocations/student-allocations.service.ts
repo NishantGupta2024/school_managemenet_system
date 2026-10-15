@@ -16,16 +16,15 @@ export class StudentAllocationsService {
   private calculateTotalBaseFee(
     items: { feeHeadId: string; amount: Prisma.Decimal; frequency: FeeFrequency; isOptional: boolean }[],
     optedHeadIds: string[] = [],
-  ): number {
+  ): Prisma.Decimal {
     const optedSet = new Set(optedHeadIds);
-    let total = 0;
+    let total = new Prisma.Decimal(0);
 
     for (const item of items) {
       if (item.isOptional && !optedSet.has(item.feeHeadId)) {
         continue;
       }
 
-      const amount = Number(item.amount);
       let multiplier = 1;
       if (item.frequency === FeeFrequency.MONTHLY) {
         multiplier = 12;
@@ -33,10 +32,11 @@ export class StudentAllocationsService {
         multiplier = 1;
       }
 
-      total += amount * multiplier;
+      const itemAmount = new Prisma.Decimal(item.amount);
+      total = total.add(itemAmount.mul(multiplier));
     }
 
-    return Math.round(total * 100) / 100;
+    return total.toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
   }
 
   async create(schoolId: string, currentUserId: string, dto: CreateStudentAllocationDto) {
@@ -123,9 +123,10 @@ export class StudentAllocationsService {
     let authorizedByUserId: string | null = null;
 
     const totalBaseFee = this.calculateTotalBaseFee(structure.items, optedHeadIds);
+    const concessionDecimal = new Prisma.Decimal(concessionValue);
 
     if (concessionType === ConcessionType.PERCENTAGE) {
-      if (concessionValue <= 0 || concessionValue > 100) {
+      if (concessionDecimal.lessThanOrEqualTo(0) || concessionDecimal.greaterThan(100)) {
         throw new BadRequestException('Percentage concession must be between 0.01% and 100%');
       }
       if (!concessionReason) {
@@ -133,12 +134,12 @@ export class StudentAllocationsService {
       }
       authorizedByUserId = currentUserId;
     } else if (concessionType === ConcessionType.FLAT_DISCOUNT) {
-      if (concessionValue <= 0) {
+      if (concessionDecimal.lessThanOrEqualTo(0)) {
         throw new BadRequestException('Flat discount concession must be greater than 0');
       }
-      if (concessionValue > totalBaseFee) {
+      if (concessionDecimal.greaterThan(totalBaseFee)) {
         throw new BadRequestException(
-          `Flat discount concession (${concessionValue}) cannot exceed total base fee (${totalBaseFee.toFixed(2)})`,
+          `Flat discount concession (${concessionDecimal.toFixed(2)}) cannot exceed total base fee (${totalBaseFee.toFixed(2)})`,
         );
       }
       if (!concessionReason) {
@@ -146,7 +147,6 @@ export class StudentAllocationsService {
       }
       authorizedByUserId = currentUserId;
     } else {
-      concessionValue = 0;
       concessionReason = null;
       authorizedByUserId = null;
     }
@@ -159,7 +159,10 @@ export class StudentAllocationsService {
         feeStructureId: dto.feeStructureId,
         academicYearId: dto.academicYearId,
         concessionType,
-        concessionValue: new Prisma.Decimal(concessionValue.toFixed(2)),
+        concessionValue:
+          concessionType === ConcessionType.NONE
+            ? new Prisma.Decimal('0.00')
+            : concessionDecimal.toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP),
         concessionReason,
         authorizedByUserId,
         optedFeeHeadIds: optedHeadIds,
@@ -352,9 +355,10 @@ export class StudentAllocationsService {
     let authorizedByUserId = existing.authorizedByUserId;
 
     const totalBaseFee = this.calculateTotalBaseFee(structure.items, optedHeadIds);
+    const concessionDecimal = new Prisma.Decimal(concessionValue);
 
     if (concessionType === ConcessionType.PERCENTAGE) {
-      if (concessionValue <= 0 || concessionValue > 100) {
+      if (concessionDecimal.lessThanOrEqualTo(0) || concessionDecimal.greaterThan(100)) {
         throw new BadRequestException('Percentage concession must be between 0.01% and 100%');
       }
       if (!concessionReason) {
@@ -362,12 +366,12 @@ export class StudentAllocationsService {
       }
       authorizedByUserId = currentUserId;
     } else if (concessionType === ConcessionType.FLAT_DISCOUNT) {
-      if (concessionValue <= 0) {
+      if (concessionDecimal.lessThanOrEqualTo(0)) {
         throw new BadRequestException('Flat discount concession must be greater than 0');
       }
-      if (concessionValue > totalBaseFee) {
+      if (concessionDecimal.greaterThan(totalBaseFee)) {
         throw new BadRequestException(
-          `Flat discount concession (${concessionValue}) cannot exceed total base fee (${totalBaseFee.toFixed(2)})`,
+          `Flat discount concession (${concessionDecimal.toFixed(2)}) cannot exceed total base fee (${totalBaseFee.toFixed(2)})`,
         );
       }
       if (!concessionReason) {
@@ -375,7 +379,6 @@ export class StudentAllocationsService {
       }
       authorizedByUserId = currentUserId;
     } else {
-      concessionValue = 0;
       concessionReason = null;
       authorizedByUserId = null;
     }
@@ -390,7 +393,10 @@ export class StudentAllocationsService {
       data: {
         feeStructureId,
         concessionType,
-        concessionValue: new Prisma.Decimal(concessionValue.toFixed(2)),
+        concessionValue:
+          concessionType === ConcessionType.NONE
+            ? new Prisma.Decimal('0.00')
+            : concessionDecimal.toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP),
         concessionReason,
         authorizedByUserId,
         optedFeeHeadIds: optedHeadIds,
