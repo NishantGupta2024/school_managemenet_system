@@ -7,21 +7,21 @@ export class TenantMiddleware implements NestMiddleware {
   constructor(private readonly tenantContextService: TenantContextService) {}
 
   use(req: Request, res: Response, next: NextFunction) {
-    // Extract school/tenant ID from HTTP header 'x-school-id' or query or fallback to default
-    const headerSchoolId = req.headers['x-school-id'] as string;
-    const defaultSchoolId = process.env.DEFAULT_TENANT_ID || '00000000-0000-0000-0000-000000000001';
-    const schoolId = headerSchoolId || defaultSchoolId;
+    const rawSchoolId = req.headers['x-school-id'];
+    let schoolId: string | undefined;
 
-    // Attach to response header for telemetry and verification
-    res.setHeader('x-school-id', schoolId);
+    // Strict validation: Reject arrays, require clean non-empty string
+    if (typeof rawSchoolId === 'string' && rawSchoolId.trim().length > 0) {
+      schoolId = rawSchoolId.trim();
+    }
 
-    this.tenantContextService.run(
-      {
-        schoolId,
-      },
-      () => {
-        next();
-      },
-    );
+    // Notice: NO default tenant fallback.
+    // Unauthenticated/unspecified requests run with undefined tenant context.
+    if (schoolId) {
+      res.setHeader('x-school-id', schoolId);
+      this.tenantContextService.run({ schoolId }, () => next());
+    } else {
+      this.tenantContextService.run({ schoolId: undefined as any }, () => next());
+    }
   }
 }

@@ -14,11 +14,11 @@ enum TenantStatus {
 }
 
 enum UserRole {
-  SUPER_ADMIN
+  PLATFORM_SUPER_ADMIN
   SCHOOL_ADMIN
-  ACCOUNTANT
-  CASHIER
-  AUDITOR
+  FEE_STAFF
+  STUDENT
+  PARENT
 }
 
 enum UserStatus {
@@ -60,20 +60,20 @@ model School {
 }
 
 // -------------------------------------------------------------
-// School Staff & Administration Users
+// Users: Platform Super Admins, School Admins, Staff, Students, Parents
 // -------------------------------------------------------------
 model User {
   id           String     @id @default(uuid())
-  schoolId     String
+  schoolId     String?    // Nullable strictly for PLATFORM_SUPER_ADMIN
   email        String
   passwordHash String
   name         String
-  role         UserRole   @default(ACCOUNTANT)
+  role         UserRole   @default(FEE_STAFF)
   status       UserStatus @default(ACTIVE)
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
 
-  school       School     @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  school       School?    @relation(fields: [schoolId], references: [id], onDelete: Cascade)
 
   @@unique([schoolId, email])
   @@index([schoolId])
@@ -97,6 +97,7 @@ model AcademicYear {
   students  Student[]
 
   @@unique([schoolId, name])
+  @@unique([schoolId, id]) // Required for composite foreign key constraint
   @@index([schoolId])
   @@map("academic_years")
 }
@@ -117,6 +118,7 @@ model GradeClass {
   students  Student[]
 
   @@unique([schoolId, code])
+  @@unique([schoolId, id]) // Required for composite foreign key constraint
   @@index([schoolId])
   @@map("grade_classes")
 }
@@ -134,10 +136,12 @@ model Section {
   updatedAt DateTime   @updatedAt
 
   school    School     @relation(fields: [schoolId], references: [id], onDelete: Cascade)
-  grade     GradeClass @relation(fields: [gradeId], references: [id], onDelete: Cascade)
+  // Composite foreign key: Guarantees grade belongs to the EXACT same school
+  grade     GradeClass @relation(fields: [schoolId, gradeId], references: [schoolId, id], onDelete: Cascade)
   students  Student[]
 
   @@unique([schoolId, gradeId, name])
+  @@unique([schoolId, id]) // Required for composite foreign key constraint
   @@index([schoolId])
   @@index([gradeId])
   @@map("sections")
@@ -165,11 +169,13 @@ model Student {
   updatedAt       DateTime      @updatedAt
 
   school          School        @relation(fields: [schoolId], references: [id], onDelete: Cascade)
-  grade           GradeClass    @relation(fields: [gradeId], references: [id], onDelete: Cascade)
-  section         Section       @relation(fields: [sectionId], references: [id], onDelete: Cascade)
-  academicYear    AcademicYear  @relation(fields: [academicYearId], references: [id], onDelete: Cascade)
+  // Composite foreign keys: Impossible for a student in School A to link to grade/section/session of School B
+  grade           GradeClass    @relation(fields: [schoolId, gradeId], references: [schoolId, id], onDelete: Cascade)
+  section         Section       @relation(fields: [schoolId, sectionId], references: [schoolId, id], onDelete: Cascade)
+  academicYear    AcademicYear  @relation(fields: [schoolId, academicYearId], references: [schoolId, id], onDelete: Cascade)
 
   @@unique([schoolId, admissionNumber])
+  @@unique([schoolId, id])
   @@index([schoolId])
   @@index([gradeId])
   @@index([sectionId])
