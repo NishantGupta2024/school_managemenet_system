@@ -6,6 +6,9 @@ import { TenantMiddleware } from './common/tenant/tenant.middleware';
 import { HealthModule } from './health/health.module';
 import { AuthModule } from './auth/auth.module';
 import { StudentsModule } from './students/students.module';
+import { FeeHeadsModule } from './fee-heads/fee-heads.module';
+import { FeeStructuresModule } from './fee-structures/fee-structures.module';
+import { StudentAllocationsModule } from './student-allocations/student-allocations.module';
 
 @Module({
   imports: [
@@ -18,6 +21,9 @@ import { StudentsModule } from './students/students.module';
     AuthModule,
     HealthModule,
     StudentsModule,
+    FeeHeadsModule,
+    FeeStructuresModule,
+    StudentAllocationsModule,
   ],
 })
 export class AppModule implements NestModule {

@@ -19,6 +19,20 @@ export class StudentsController {
     return this.studentsService.findAllForSchool(schoolId);
   }
 
+  @Get('meta/grades')
+  @Roles(UserRole.PLATFORM_SUPER_ADMIN, UserRole.SCHOOL_ADMIN, UserRole.FEE_STAFF)
+  async findGrades(@Request() req: any) {
+    const schoolId = req.school.id;
+    return this.studentsService.findGradesForSchool(schoolId);
+  }
+
+  @Get('meta/academic-years')
+  @Roles(UserRole.PLATFORM_SUPER_ADMIN, UserRole.SCHOOL_ADMIN, UserRole.FEE_STAFF)
+  async findAcademicYears(@Request() req: any) {
+    const schoolId = req.school.id;
+    return this.studentsService.findAcademicYearsForSchool(schoolId);
+  }
+
   @Get(':id')
   @Roles(UserRole.PLATFORM_SUPER_ADMIN, UserRole.SCHOOL_ADMIN, UserRole.FEE_STAFF)
   async findOne(@Param('id') id: string, @Request() req: any) {

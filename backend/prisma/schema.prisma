@@ -33,28 +33,68 @@ enum StudentStatus {
   ALUMNI
 }
 
+enum FeeHeadCategory {
+  ACADEMIC
+  FACILITY
+  INSTITUTIONAL
+  ACTIVITY
+  MISCELLANEOUS
+}
+
+enum FeeHeadStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum FeeFrequency {
+  MONTHLY
+  ANNUAL
+  ONE_TIME
+}
+
+enum FeeStructureStatus {
+  ACTIVE
+  INACTIVE
+  ARCHIVED
+}
+
+enum ConcessionType {
+  NONE
+  PERCENTAGE
+  FLAT_DISCOUNT
+}
+
+enum AllocationStatus {
+  ACTIVE
+  INACTIVE
+}
+
 // -------------------------------------------------------------
 // Core Multi-Tenant Foundation: School / Tenant
 // -------------------------------------------------------------
 model School {
-  id            String         @id @default(uuid())
-  code          String         @unique // e.g. "SCH001"
-  name          String
-  address       String?
-  city          String?
-  state         String?
-  country       String         @default("IN")
-  currency      String         @default("INR")
-  timezone      String         @default("Asia/Kolkata")
-  status        TenantStatus   @default(ACTIVE)
-  createdAt     DateTime       @default(now())
-  updatedAt     DateTime       @updatedAt
+  id                    String                 @id @default(uuid())
+  code                  String                 @unique // e.g. "SCH001"
+  name                  String
+  address               String?
+  city                  String?
+  state                 String?
+  country               String                 @default("IN")
+  currency              String                 @default("INR")
+  timezone              String                 @default("Asia/Kolkata")
+  status                TenantStatus           @default(ACTIVE)
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
 
-  users         User[]
-  academicYears AcademicYear[]
-  grades        GradeClass[]
-  sections      Section[]
-  students      Student[]
+  users                 User[]
+  academicYears         AcademicYear[]
+  grades                GradeClass[]
+  sections              Section[]
+  students              Student[]
+  feeHeads              FeeHead[]
+  feeStructures         FeeStructure[]
+  feeStructureItems     FeeStructureItem[]
+  studentFeeAllocations StudentFeeAllocation[]
 
   @@map("schools")
 }
@@ -63,17 +103,18 @@ model School {
 // Users: Platform Super Admins, School Admins, Staff, Students, Parents
 // -------------------------------------------------------------
 model User {
-  id           String     @id @default(uuid())
-  schoolId     String?    // Nullable strictly for PLATFORM_SUPER_ADMIN
-  email        String
-  passwordHash String
-  name         String
-  role         UserRole   @default(FEE_STAFF)
-  status       UserStatus @default(ACTIVE)
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
+  id                    String                 @id @default(uuid())
+  schoolId              String?                // Nullable strictly for PLATFORM_SUPER_ADMIN
+  email                 String
+  passwordHash          String
+  name                  String
+  role                  UserRole               @default(FEE_STAFF)
+  status                UserStatus             @default(ACTIVE)
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
 
-  school       School?    @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  school                School?                @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  authorizedAllocations StudentFeeAllocation[]
 
   @@unique([schoolId, email])
   @@index([schoolId])
@@ -84,17 +125,19 @@ model User {
 // Academic Sessions / Years
 // -------------------------------------------------------------
 model AcademicYear {
-  id        String    @id @default(uuid())
-  schoolId  String
-  name      String    // e.g. "2026-2027"
-  startDate DateTime
-  endDate   DateTime
-  isCurrent Boolean   @default(false)
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
+  id                    String                 @id @default(uuid())
+  schoolId              String
+  name                  String                 // e.g. "2026-2027"
+  startDate             DateTime
+  endDate               DateTime
+  isCurrent             Boolean                @default(false)
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
 
-  school    School    @relation(fields: [schoolId], references: [id], onDelete: Cascade)
-  students  Student[]
+  school                School                 @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  students              Student[]
+  feeStructures         FeeStructure[]
+  studentFeeAllocations StudentFeeAllocation[]
 
   @@unique([schoolId, name])
   @@unique([schoolId, id]) // Required for composite foreign key constraint
@@ -106,16 +149,17 @@ model AcademicYear {
 // Academic Grade / Class Structure
 // -------------------------------------------------------------
 model GradeClass {
-  id        String    @id @default(uuid())
-  schoolId  String
-  name      String    // e.g. "Grade 10"
-  code      String    // e.g. "G10"
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
+  id            String         @id @default(uuid())
+  schoolId      String
+  name          String         // e.g. "Grade 10"
+  code          String         // e.g. "G10"
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
 
-  school    School    @relation(fields: [schoolId], references: [id], onDelete: Cascade)
-  sections  Section[]
-  students  Student[]
+  school        School         @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  sections      Section[]
+  students      Student[]
+  feeStructures FeeStructure[]
 
   @@unique([schoolId, code])
   @@unique([schoolId, id]) // Required for composite foreign key constraint
@@ -151,7 +195,7 @@ model Section {
 // Student Profiles
 // -------------------------------------------------------------
 model Student {
-  id              String        @id @default(uuid())
+  id              String                 @id @default(uuid())
   schoolId        String
   admissionNumber String
   rollNumber      String?
@@ -164,15 +208,16 @@ model Student {
   gradeId         String
   sectionId       String
   academicYearId  String
-  status          StudentStatus @default(ACTIVE)
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
+  status          StudentStatus          @default(ACTIVE)
+  createdAt       DateTime               @default(now())
+  updatedAt       DateTime               @updatedAt
 
-  school          School        @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  school          School                 @relation(fields: [schoolId], references: [id], onDelete: Cascade)
   // Composite foreign keys: Impossible for a student in School A to link to grade/section/session of School B
-  grade           GradeClass    @relation(fields: [schoolId, gradeId], references: [schoolId, id], onDelete: Cascade)
-  section         Section       @relation(fields: [schoolId, sectionId], references: [schoolId, id], onDelete: Cascade)
-  academicYear    AcademicYear  @relation(fields: [schoolId, academicYearId], references: [schoolId, id], onDelete: Cascade)
+  grade           GradeClass             @relation(fields: [schoolId, gradeId], references: [schoolId, id], onDelete: Cascade)
+  section         Section                @relation(fields: [schoolId, sectionId], references: [schoolId, id], onDelete: Cascade)
+  academicYear    AcademicYear           @relation(fields: [schoolId, academicYearId], references: [schoolId, id], onDelete: Cascade)
+  feeAllocations  StudentFeeAllocation[]
 
   @@unique([schoolId, admissionNumber])
   @@unique([schoolId, id])
@@ -181,4 +226,126 @@ model Student {
   @@index([sectionId])
   @@index([academicYearId])
   @@map("students")
+}
+
+// =============================================================
+// PHASE 2B: FEE CONFIGURATION TIER
+// =============================================================
+
+// -------------------------------------------------------------
+// Fee Head: Catalog of charges per school
+// -------------------------------------------------------------
+model FeeHead {
+  id             String             @id @default(uuid())
+  schoolId       String
+  name           String             // e.g. "Tuition Fee", "Transport Fee"
+  code           String             // e.g. "TUIT", "TRN"
+  description    String?
+  category       FeeHeadCategory    @default(ACADEMIC)
+  isOptional     Boolean            @default(false) // e.g. transport is optional
+  status         FeeHeadStatus      @default(ACTIVE)
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+
+  school         School             @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  structureItems FeeStructureItem[]
+
+  @@unique([schoolId, code])
+  @@unique([schoolId, id])
+  @@index([schoolId])
+  @@map("fee_heads")
+}
+
+// -------------------------------------------------------------
+// Fee Structure: Class & Academic Year Master Template
+// -------------------------------------------------------------
+model FeeStructure {
+  id             String                 @id @default(uuid())
+  schoolId       String
+  academicYearId String
+  gradeId        String
+  name           String                 // e.g. "Grade 10 General Fee 2026-2027"
+  description    String?
+  status         FeeStructureStatus     @default(ACTIVE)
+  createdAt      DateTime               @default(now())
+  updatedAt      DateTime               @updatedAt
+
+  school         School                 @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  academicYear   AcademicYear           @relation(fields: [schoolId, academicYearId], references: [schoolId, id], onDelete: Cascade)
+  grade          GradeClass             @relation(fields: [schoolId, gradeId], references: [schoolId, id], onDelete: Cascade)
+  items          FeeStructureItem[]
+  allocations    StudentFeeAllocation[]
+
+  @@unique([schoolId, academicYearId, gradeId, name])
+  @@unique([schoolId, id])
+  @@index([schoolId])
+  @@index([gradeId])
+  @@index([academicYearId])
+  @@map("fee_structures")
+}
+
+// -------------------------------------------------------------
+// Fee Structure Item: Item Breakdown within a Structure
+// -------------------------------------------------------------
+model FeeStructureItem {
+  id             String       @id @default(uuid())
+  schoolId       String
+  feeStructureId String
+  feeHeadId      String
+  amount         Decimal      @db.Decimal(12, 2)
+  frequency      FeeFrequency @default(MONTHLY)
+  isOptional     Boolean      @default(false)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  school         School       @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  feeStructure   FeeStructure @relation(fields: [schoolId, feeStructureId], references: [schoolId, id], onDelete: Cascade)
+  // Composite foreign key to FeeHead: strictly enforces same school
+  // onDelete: Restrict prevents deleting fee head while used in a structure
+  feeHead        FeeHead      @relation(fields: [schoolId, feeHeadId], references: [schoolId, id], onDelete: Restrict)
+
+  @@unique([schoolId, feeStructureId, feeHeadId])
+  @@unique([schoolId, id])
+  @@index([schoolId])
+  @@index([feeStructureId])
+  @@index([feeHeadId])
+  @@map("fee_structure_items")
+}
+
+// -------------------------------------------------------------
+// Student Fee Allocation: Enrolling Student into Fee Structure
+// -------------------------------------------------------------
+model StudentFeeAllocation {
+  id                 String           @id @default(uuid())
+  schoolId           String
+  studentId          String
+  feeStructureId     String
+  academicYearId     String
+  status             AllocationStatus @default(ACTIVE)
+
+  // Concession / Discount Policy (At most 1 concession per student allocation)
+  concessionType     ConcessionType   @default(NONE)
+  concessionValue    Decimal          @default(0.00) @db.Decimal(12, 2)
+  concessionReason   String?
+  authorizedByUserId String?
+
+  // JSON Array of opted optional FeeHead IDs, e.g. ["fee-head-uuid-1"]
+  optedFeeHeadIds    Json             @default("[]")
+
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+
+  school             School           @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  student            Student          @relation(fields: [schoolId, studentId], references: [schoolId, id], onDelete: Cascade)
+  feeStructure       FeeStructure     @relation(fields: [schoolId, feeStructureId], references: [schoolId, id], onDelete: Cascade)
+  academicYear       AcademicYear     @relation(fields: [schoolId, academicYearId], references: [schoolId, id], onDelete: Cascade)
+  authorizedBy       User?            @relation(fields: [authorizedByUserId], references: [id], onDelete: SetNull)
+
+  @@unique([schoolId, studentId, academicYearId])
+  @@unique([schoolId, id])
+  @@index([schoolId])
+  @@index([studentId])
+  @@index([feeStructureId])
+  @@index([academicYearId])
+  @@map("student_fee_allocations")
 }

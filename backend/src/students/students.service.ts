@@ -39,4 +39,19 @@ export class StudentsService {
 
     return student;
   }
+
+  async findGradesForSchool(schoolId: string) {
+    return this.prisma.gradeClass.findMany({
+      where: { schoolId },
+      include: { sections: true },
+      orderBy: { code: 'asc' },
+    });
+  }
+
+  async findAcademicYearsForSchool(schoolId: string) {
+    return this.prisma.academicYear.findMany({
+      where: { schoolId },
+      orderBy: { startDate: 'desc' },
+    });
+  }
 }
