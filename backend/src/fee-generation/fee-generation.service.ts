@@ -56,15 +56,71 @@ export const BILLING_MONTH_NAMES = [
 export class FeeGenerationService {
   constructor(private readonly prisma: PrismaService) {}
 
-  public getDueDateForBillingMonth(academicYear: AcademicYear, billingMonth: number): Date {
+  public convertLocalToUtc(
+    year: number,
+    monthIndex: number,
+    day: number,
+    hour: number,
+    minute: number,
+    second: number,
+    ms: number,
+    timeZone: string = 'Asia/Kolkata',
+  ): Date {
+    const approx = new Date(Date.UTC(year, monthIndex, day, hour, minute, second, ms));
+    const formatter = new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hourCycle: 'h23',
+    });
+    const parts = formatter.formatToParts(approx);
+    const partMap: Record<string, string> = {};
+    for (const p of parts) partMap[p.type] = p.value;
+
+    const formattedAsUtc = Date.UTC(
+      parseInt(partMap.year, 10),
+      parseInt(partMap.month, 10) - 1,
+      parseInt(partMap.day, 10),
+      parseInt(partMap.hour, 10),
+      parseInt(partMap.minute, 10),
+      parseInt(partMap.second, 10),
+      ms,
+    );
+    const offset = formattedAsUtc - approx.getTime();
+    return new Date(approx.getTime() - offset);
+  }
+
+  public getDueDateForBillingMonth(
+    academicYear: AcademicYear,
+    billingMonth: number,
+    timezone: string = 'Asia/Kolkata',
+  ): Date {
     const startYear = academicYear.startDate.getUTCFullYear();
     // billingMonth 1 = April (calendar month index 3), billingMonth 10 = January (calendar month index 0)
     const monthOffset = billingMonth - 1;
     const calendarMonth = (3 + monthOffset) % 12;
     const calendarYear = startYear + Math.floor((3 + monthOffset) / 12);
 
-    // Standard school fee due date: 10th of the calendar month
-    return new Date(Date.UTC(calendarYear, calendarMonth, 10, 23, 59, 59, 999));
+    // Standard school fee due date: 10th of the calendar month at 23:59:59.999 local school time
+    return this.convertLocalToUtc(calendarYear, calendarMonth, 10, 23, 59, 59, 999, timezone);
+  }
+
+  public getMonthStartDateForBillingMonth(
+    academicYear: AcademicYear,
+    billingMonth: number,
+    timezone: string = 'Asia/Kolkata',
+  ): Date {
+    const startYear = academicYear.startDate.getUTCFullYear();
+    const monthOffset = billingMonth - 1;
+    const calendarMonth = (3 + monthOffset) % 12;
+    const calendarYear = startYear + Math.floor((3 + monthOffset) / 12);
+
+    // Billing month start: 1st of the calendar month at 00:00:00.000 local school time
+    return this.convertLocalToUtc(calendarYear, calendarMonth, 1, 0, 0, 0, 0, timezone);
   }
 
   public deriveCurrentInvoiceStatus(
@@ -72,6 +128,7 @@ export class FeeGenerationService {
     dueDate: Date,
     asOfDate: Date = new Date(),
     gracePeriodDays: number = 5,
+    monthStartDate?: Date,
   ): InvoiceStatus {
     if (status === InvoiceStatus.VOID) {
       return InvoiceStatus.VOID;
@@ -81,7 +138,13 @@ export class FeeGenerationService {
     const currentTime = asOfDate.getTime();
     const gracePeriodMs = gracePeriodDays * 24 * 60 * 60 * 1000;
 
-    if (currentTime < dueTime) {
+    // Billing month starts on the 1st of the month at 00:00:00
+    // If not passed explicitly, derived from dueDate (day 10 23:59:59.999 -> day 1 00:00:00.000)
+    const monthStartTime = monthStartDate
+      ? monthStartDate.getTime()
+      : dueTime - (9 * 24 * 60 * 60 * 1000 + (23 * 3600 + 59 * 60 + 59) * 1000 + 999);
+
+    if (currentTime < monthStartTime) {
       return InvoiceStatus.UPCOMING;
     } else if (currentTime <= dueTime + gracePeriodMs) {
       return InvoiceStatus.DUE;
@@ -93,12 +156,22 @@ export class FeeGenerationService {
   public generateStudentSchedule(
     allocation: any,
     academicYear: AcademicYear,
+    timezone: string = 'Asia/Kolkata',
+    alreadyBilledOneTimeFeeHeadIds?: Set<string>,
   ): PlannedInvoice[] {
     const startMonth = Math.max(1, Math.min(12, allocation.startBillingMonth || 1));
     const optedHeadIds = new Set<string>((allocation.optedFeeHeadIds as string[]) || []);
 
     // Filter structure items: mandatory + opted optional items
+    // Omit ONE_TIME fee heads if already billed for this student in prior sessions or runs
     const eligibleStructureItems = allocation.feeStructure.items.filter((item: any) => {
+      if (
+        item.frequency === FeeFrequency.ONE_TIME &&
+        alreadyBilledOneTimeFeeHeadIds &&
+        alreadyBilledOneTimeFeeHeadIds.has(item.feeHeadId)
+      ) {
+        return false;
+      }
       if (item.isOptional) {
         return optedHeadIds.has(item.feeHeadId);
       }
@@ -121,7 +194,7 @@ export class FeeGenerationService {
 
     // 1. Build initial gross item schedule
     for (let m = startMonth; m <= 12; m++) {
-      const dueDate = this.getDueDateForBillingMonth(academicYear, m);
+      const dueDate = this.getDueDateForBillingMonth(academicYear, m, timezone);
       const monthName = BILLING_MONTH_NAMES[m - 1];
       const monthItems: any[] = [];
 
@@ -264,13 +337,20 @@ export class FeeGenerationService {
   }
 
   async preview(schoolId: string, dto: PreviewFeeGenerationDto) {
-    // 1. Verify Academic Year
-    const academicYear = await this.prisma.academicYear.findUnique({
-      where: { schoolId_id: { schoolId, id: dto.academicYearId } },
-    });
+    // 1. Verify Academic Year and School Timezone
+    const [academicYear, school] = await Promise.all([
+      this.prisma.academicYear.findUnique({
+        where: { schoolId_id: { schoolId, id: dto.academicYearId } },
+      }),
+      this.prisma.school.findUnique({
+        where: { id: schoolId },
+        select: { timezone: true },
+      }),
+    ]);
     if (!academicYear) {
       throw new NotFoundException(`Academic year ${dto.academicYearId} not found in this school`);
     }
+    const timezone = school?.timezone || 'Asia/Kolkata';
 
     // 2. Fetch active allocations
     const whereAllocation: any = {
@@ -319,6 +399,52 @@ export class FeeGenerationService {
       existingInvoices.map((inv) => `${inv.studentId}_${inv.billingMonth}`),
     );
 
+    // 4. Fetch already billed ONE_TIME fee heads across all sessions
+    const studentIdsList = allocations.map((a) => a.studentId);
+    const [oneTimeBillings, legacyOneTimeItems] = await Promise.all([
+      this.prisma.studentOneTimeFeeBilling.findMany({
+        where: {
+          schoolId,
+          studentId: { in: studentIdsList },
+        },
+        select: {
+          studentId: true,
+          feeHeadId: true,
+        },
+      }),
+      this.prisma.invoiceItem.findMany({
+        where: {
+          schoolId,
+          billingFrequencySnapshot: FeeFrequency.ONE_TIME,
+          invoice: {
+            studentId: { in: studentIdsList },
+          },
+        },
+        select: {
+          feeHeadId: true,
+          invoice: {
+            select: { studentId: true },
+          },
+        },
+      }),
+    ]);
+
+    const studentBilledOneTimeMap = new Map<string, Set<string>>();
+    for (const b of oneTimeBillings) {
+      if (!studentBilledOneTimeMap.has(b.studentId)) {
+        studentBilledOneTimeMap.set(b.studentId, new Set<string>());
+      }
+      studentBilledOneTimeMap.get(b.studentId)!.add(b.feeHeadId);
+    }
+    for (const l of legacyOneTimeItems) {
+      if (l.invoice?.studentId) {
+        if (!studentBilledOneTimeMap.has(l.invoice.studentId)) {
+          studentBilledOneTimeMap.set(l.invoice.studentId, new Set<string>());
+        }
+        studentBilledOneTimeMap.get(l.invoice.studentId)!.add(l.feeHeadId);
+      }
+    }
+
     let totalPlannedInvoices = 0;
     let newInvoicesToCreate = 0;
     let existingInvoicesToSkip = 0;
@@ -340,7 +466,8 @@ export class FeeGenerationService {
         continue;
       }
 
-      const schedule = this.generateStudentSchedule(alloc, academicYear);
+      const billedOneTimeHeads = studentBilledOneTimeMap.get(alloc.studentId) || new Set<string>();
+      const schedule = this.generateStudentSchedule(alloc, academicYear, timezone, billedOneTimeHeads);
 
       for (const invoicePlan of schedule) {
         totalPlannedInvoices++;
@@ -375,13 +502,20 @@ export class FeeGenerationService {
   }
 
   async execute(schoolId: string, executedByUserId: string, dto: ExecuteFeeGenerationDto) {
-    // 1. Verify Academic Year
-    const academicYear = await this.prisma.academicYear.findUnique({
-      where: { schoolId_id: { schoolId, id: dto.academicYearId } },
-    });
+    // 1. Verify Academic Year and School Timezone
+    const [academicYear, school] = await Promise.all([
+      this.prisma.academicYear.findUnique({
+        where: { schoolId_id: { schoolId, id: dto.academicYearId } },
+      }),
+      this.prisma.school.findUnique({
+        where: { id: schoolId },
+        select: { timezone: true },
+      }),
+    ]);
     if (!academicYear) {
       throw new NotFoundException(`Academic year ${dto.academicYearId} not found in this school`);
     }
+    const timezone = school?.timezone || 'Asia/Kolkata';
 
     // 2. Fetch active allocations
     const whereAllocation: any = {
@@ -434,6 +568,52 @@ export class FeeGenerationService {
       existingInvoices.map((inv) => `${inv.studentId}_${inv.billingMonth}`),
     );
 
+    // 4. Fetch already billed ONE_TIME fee heads across all sessions
+    const studentIdsList = allocations.map((a) => a.studentId);
+    const [oneTimeBillings, legacyOneTimeItems] = await Promise.all([
+      this.prisma.studentOneTimeFeeBilling.findMany({
+        where: {
+          schoolId,
+          studentId: { in: studentIdsList },
+        },
+        select: {
+          studentId: true,
+          feeHeadId: true,
+        },
+      }),
+      this.prisma.invoiceItem.findMany({
+        where: {
+          schoolId,
+          billingFrequencySnapshot: FeeFrequency.ONE_TIME,
+          invoice: {
+            studentId: { in: studentIdsList },
+          },
+        },
+        select: {
+          feeHeadId: true,
+          invoice: {
+            select: { studentId: true },
+          },
+        },
+      }),
+    ]);
+
+    const studentBilledOneTimeMap = new Map<string, Set<string>>();
+    for (const b of oneTimeBillings) {
+      if (!studentBilledOneTimeMap.has(b.studentId)) {
+        studentBilledOneTimeMap.set(b.studentId, new Set<string>());
+      }
+      studentBilledOneTimeMap.get(b.studentId)!.add(b.feeHeadId);
+    }
+    for (const l of legacyOneTimeItems) {
+      if (l.invoice?.studentId) {
+        if (!studentBilledOneTimeMap.has(l.invoice.studentId)) {
+          studentBilledOneTimeMap.set(l.invoice.studentId, new Set<string>());
+        }
+        studentBilledOneTimeMap.get(l.invoice.studentId)!.add(l.feeHeadId);
+      }
+    }
+
     let createdInvoicesCount = 0;
     let skippedInvoicesCount = 0;
     let failedInvoicesCount = 0;
@@ -442,7 +622,7 @@ export class FeeGenerationService {
     let totalNetCreated = new Prisma.Decimal(0);
     const studentIds = new Set<string>();
 
-    // 4. Execute atomic generation per student allocation
+    // 5. Execute atomic generation per student allocation
     for (const alloc of allocations) {
       studentIds.add(alloc.studentId);
 
@@ -451,7 +631,8 @@ export class FeeGenerationService {
         continue;
       }
 
-      const schedule = this.generateStudentSchedule(alloc, academicYear);
+      const billedOneTimeHeads = studentBilledOneTimeMap.get(alloc.studentId) || new Set<string>();
+      const schedule = this.generateStudentSchedule(alloc, academicYear, timezone, billedOneTimeHeads);
 
       for (const invoicePlan of schedule) {
         const key = `${invoicePlan.studentId}_${invoicePlan.billingMonth}`;
@@ -463,6 +644,11 @@ export class FeeGenerationService {
 
         try {
           await this.prisma.$transaction(async (tx) => {
+            const initialStatus = this.deriveCurrentInvoiceStatus(
+              InvoiceStatus.UPCOMING,
+              invoicePlan.dueDate,
+            );
+
             await tx.feeInvoice.create({
               data: {
                 schoolId,
@@ -473,7 +659,7 @@ export class FeeGenerationService {
                 grossAmount: invoicePlan.grossAmount,
                 discountAmount: invoicePlan.discountAmount,
                 netAmount: invoicePlan.netAmount,
-                status: InvoiceStatus.UPCOMING,
+                status: initialStatus,
                 items: {
                   create: invoicePlan.items.map((item) => ({
                     feeHeadId: item.feeHeadId,
@@ -486,6 +672,33 @@ export class FeeGenerationService {
                 },
               },
             });
+
+            // Persist ONE_TIME fee billing record to prevent any future rebilling across sessions
+            const oneTimeItems = invoicePlan.items.filter(
+              (item) => item.billingFrequencySnapshot === FeeFrequency.ONE_TIME,
+            );
+            for (const otItem of oneTimeItems) {
+              await tx.studentOneTimeFeeBilling.upsert({
+                where: {
+                  schoolId_studentId_feeHeadId: {
+                    schoolId,
+                    studentId: invoicePlan.studentId,
+                    feeHeadId: otItem.feeHeadId,
+                  },
+                },
+                update: {},
+                create: {
+                  schoolId,
+                  studentId: invoicePlan.studentId,
+                  feeHeadId: otItem.feeHeadId,
+                  academicYearId: invoicePlan.academicYearId,
+                },
+              });
+              if (!studentBilledOneTimeMap.has(invoicePlan.studentId)) {
+                studentBilledOneTimeMap.set(invoicePlan.studentId, new Set<string>());
+              }
+              studentBilledOneTimeMap.get(invoicePlan.studentId)!.add(otItem.feeHeadId);
+            }
           });
 
           // Mark as existing in local memory set
@@ -585,16 +798,23 @@ export class FeeGenerationService {
     // 2. Strict Role-based student authorization:
     // PLATFORM_SUPER_ADMIN, SCHOOL_ADMIN, FEE_STAFF can access any student in school
     // STUDENT and PARENT must be explicitly associated with this student
-    if (user.role === UserRole.STUDENT || user.role === UserRole.PARENT) {
-      const isGuardianMatch =
-        student.guardianEmail &&
-        student.guardianEmail.trim().toLowerCase() === user.email.trim().toLowerCase();
-      const isStudentMatch =
-        (user.email.trim().toLowerCase() === 'student@greenwood.edu' &&
-          student.admissionNumber === 'ADM-2026-001') ||
-        user.email.trim().toLowerCase().includes(student.admissionNumber.toLowerCase());
+    if (user.role === UserRole.STUDENT) {
+      if (!student.userId || student.userId !== user.id) {
+        throw new ForbiddenException(
+          'Access denied: You are not authorized to view this student fee statement',
+        );
+      }
+    } else if (user.role === UserRole.PARENT) {
+      const verifiedRelation = await this.prisma.parentStudentRelation.findFirst({
+        where: {
+          schoolId,
+          parentId: user.id,
+          studentId: student.id,
+          isVerified: true,
+        },
+      });
 
-      if (!isGuardianMatch && !isStudentMatch) {
+      if (!verifiedRelation) {
         throw new ForbiddenException(
           'Access denied: You are not authorized to view this student fee statement',
         );

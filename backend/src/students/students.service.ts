@@ -1,9 +1,51 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { UserRole } from '@prisma/client';
 
 @Injectable()
 export class StudentsService {
   constructor(private readonly prisma: PrismaService) {}
+
+  async findAccessibleStudents(schoolId: string, user: any) {
+    if (
+      user.role === UserRole.PLATFORM_SUPER_ADMIN ||
+      user.role === UserRole.SCHOOL_ADMIN ||
+      user.role === UserRole.FEE_STAFF
+    ) {
+      return this.findAllForSchool(schoolId);
+    } else if (user.role === UserRole.STUDENT) {
+      return this.prisma.student.findMany({
+        where: {
+          schoolId,
+          userId: user.id,
+        },
+        include: {
+          grade: true,
+          section: true,
+          academicYear: true,
+        },
+      });
+    } else if (user.role === UserRole.PARENT) {
+      const relations = await this.prisma.parentStudentRelation.findMany({
+        where: {
+          schoolId,
+          parentId: user.id,
+          isVerified: true,
+        },
+        include: {
+          student: {
+            include: {
+              grade: true,
+              section: true,
+              academicYear: true,
+            },
+          },
+        },
+      });
+      return relations.map((r) => r.student);
+    }
+    return [];
+  }
 
   async findAllForSchool(schoolId: string) {
     return this.prisma.student.findMany({

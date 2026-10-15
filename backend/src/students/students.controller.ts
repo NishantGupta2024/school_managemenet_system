@@ -1,4 +1,4 @@
-import { Controller, Get, Param, Query, UseGuards, Request } from '@nestjs/common';
+import { Controller, Get, Param, Query, UseGuards, Request, NotFoundException } from '@nestjs/common';
 import { StudentsService } from './students.service';
 import { FeeGenerationService } from '../fee-generation/fee-generation.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -31,10 +31,55 @@ export class StudentsController {
   }
 
   @Get('meta/academic-years')
-  @Roles(UserRole.PLATFORM_SUPER_ADMIN, UserRole.SCHOOL_ADMIN, UserRole.FEE_STAFF)
+  @Roles(
+    UserRole.PLATFORM_SUPER_ADMIN,
+    UserRole.SCHOOL_ADMIN,
+    UserRole.FEE_STAFF,
+    UserRole.STUDENT,
+    UserRole.PARENT,
+  )
   async findAcademicYears(@Request() req: any) {
     const schoolId = req.school.id;
     return this.studentsService.findAcademicYearsForSchool(schoolId);
+  }
+
+  @Get('accessible')
+  @Roles(
+    UserRole.PLATFORM_SUPER_ADMIN,
+    UserRole.SCHOOL_ADMIN,
+    UserRole.FEE_STAFF,
+    UserRole.STUDENT,
+    UserRole.PARENT,
+  )
+  async findAccessible(@Request() req: any) {
+    const schoolId = req.school.id;
+    const user = req.user;
+    return this.studentsService.findAccessibleStudents(schoolId, user);
+  }
+
+  @Get('me/fee-statement')
+  @Roles(UserRole.STUDENT, UserRole.PARENT)
+  async getMyFeeStatement(
+    @Request() req: any,
+    @Query('academicYearId') academicYearId?: string,
+  ) {
+    const schoolId = req.school.id;
+    const user = req.user;
+    const students = await this.studentsService.findAccessibleStudents(schoolId, user);
+    if (students.length === 0) {
+      throw new NotFoundException(
+        user.role === UserRole.STUDENT
+          ? 'No student profile linked to your user account'
+          : 'No verified student profiles linked to your parent account',
+      );
+    }
+
+    return this.feeGenerationService.getStudentFeeStatement(
+      schoolId,
+      user,
+      students[0].id,
+      academicYearId,
+    );
   }
 
   @Get(':studentId/fee-statement')

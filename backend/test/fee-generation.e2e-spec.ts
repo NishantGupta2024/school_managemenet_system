@@ -3,11 +3,13 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import * as request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/prisma/prisma.service';
-import { FeeHeadCategory, FeeFrequency, ConcessionType, InvoiceStatus } from '@prisma/client';
+import { FeeHeadCategory, FeeFrequency, ConcessionType, InvoiceStatus, UserRole } from '@prisma/client';
+import { FeeGenerationService } from '../src/fee-generation/fee-generation.service';
 
 describe('Phase 2C: Monthly Fee Generation Engine (e2e)', () => {
   let app: INestApplication;
   let prisma: PrismaService;
+  let feeGenerationService: FeeGenerationService;
 
   const schoolAId = '00000000-0000-0000-0000-000000000001';
   const schoolBId = '00000000-0000-0000-0000-000000000002';
@@ -16,6 +18,8 @@ describe('Phase 2C: Monthly Fee Generation Engine (e2e)', () => {
   let tokenSchoolBAdmin: string;
   let tokenSchoolAStaff: string;
   let tokenSchoolAStudent: string;
+  let tokenSchoolAParent: string;
+  let tokenSchoolAUnlinkedParent: string;
   let tokenPlatformAdmin: string;
 
   let gradeAId: string;
@@ -81,17 +85,80 @@ describe('Phase 2C: Monthly Fee Generation Engine (e2e)', () => {
       .send({ email: 'staff@greenwood.edu', password: 'Password123!' });
     tokenSchoolAStaff = loginAStaff.body.accessToken;
 
+    feeGenerationService = app.get<FeeGenerationService>(FeeGenerationService);
+
     const loginAStudent = await request(app.getHttpServer())
       .post('/api/v1/auth/login')
       .send({ email: 'student@greenwood.edu', password: 'Password123!' });
     tokenSchoolAStudent = loginAStudent.body.accessToken;
+
+    const studentUser = await prisma.user.findFirst({ where: { email: 'student@greenwood.edu' } });
+    if (studentUser) {
+      await prisma.student.update({
+        where: { id: studentAId },
+        data: { userId: studentUser.id },
+      });
+    }
+
+    // Seed verified parent user and relationship
+    let parentUser = await prisma.user.findFirst({
+      where: { schoolId: schoolAId, email: 'parent@greenwood.edu' },
+    });
+    if (!parentUser) {
+      parentUser = await prisma.user.create({
+        data: {
+          schoolId: schoolAId,
+          email: 'parent@greenwood.edu',
+          passwordHash: studentUser!.passwordHash,
+          name: 'Priya Sharma (Parent)',
+          role: UserRole.PARENT,
+        },
+      });
+    }
+
+    await prisma.parentStudentRelation.deleteMany({ where: { schoolId: { in: [schoolAId, schoolBId] } } });
+    await prisma.parentStudentRelation.create({
+      data: {
+        schoolId: schoolAId,
+        parentId: parentUser.id,
+        studentId: studentAId,
+        relationshipType: 'MOTHER',
+        isVerified: true,
+      },
+    });
+
+    let unlinkedParent = await prisma.user.findFirst({
+      where: { schoolId: schoolAId, email: 'unlinkedparent@greenwood.edu' },
+    });
+    if (!unlinkedParent) {
+      unlinkedParent = await prisma.user.create({
+        data: {
+          schoolId: schoolAId,
+          email: 'unlinkedparent@greenwood.edu',
+          passwordHash: studentUser!.passwordHash,
+          name: 'Unlinked Parent',
+          role: UserRole.PARENT,
+        },
+      });
+    }
+
+    const loginParent = await request(app.getHttpServer())
+      .post('/api/v1/auth/login')
+      .send({ email: 'parent@greenwood.edu', password: 'Password123!' });
+    tokenSchoolAParent = loginParent.body.accessToken;
+
+    const loginUnlinkedParent = await request(app.getHttpServer())
+      .post('/api/v1/auth/login')
+      .send({ email: 'unlinkedparent@greenwood.edu', password: 'Password123!' });
+    tokenSchoolAUnlinkedParent = loginUnlinkedParent.body.accessToken;
 
     const loginSuper = await request(app.getHttpServer())
       .post('/api/v1/auth/login')
       .send({ email: 'superadmin@fee-platform.com', password: 'Password123!' });
     tokenPlatformAdmin = loginSuper.body.accessToken;
 
-    // Clean existing invoices, runs, allocations, items, structures, heads
+    // Clean existing invoices, runs, allocations, items, structures, heads, one-time billings
+    await prisma.studentOneTimeFeeBilling.deleteMany({ where: { schoolId: { in: [schoolAId, schoolBId] } } });
     await prisma.invoiceItem.deleteMany({ where: { schoolId: { in: [schoolAId, schoolBId] } } });
     await prisma.feeInvoice.deleteMany({ where: { schoolId: { in: [schoolAId, schoolBId] } } });
     await prisma.feeGenerationRun.deleteMany({ where: { schoolId: { in: [schoolAId, schoolBId] } } });
@@ -277,6 +344,7 @@ describe('Phase 2C: Monthly Fee Generation Engine (e2e)', () => {
 
   afterAll(async () => {
     // Cleanup created test records
+    await prisma.studentOneTimeFeeBilling.deleteMany({ where: { schoolId: { in: [schoolAId, schoolBId] } } });
     await prisma.invoiceItem.deleteMany({ where: { schoolId: { in: [schoolAId, schoolBId] } } });
     await prisma.feeInvoice.deleteMany({ where: { schoolId: { in: [schoolAId, schoolBId] } } });
     await prisma.feeGenerationRun.deleteMany({ where: { schoolId: { in: [schoolAId, schoolBId] } } });
@@ -606,6 +674,28 @@ describe('Phase 2C: Monthly Fee Generation Engine (e2e)', () => {
       expect(res.body.student.admissionNumber).toBe('ADM-2026-001');
     });
 
+    it('allows student user to view their own fee statement via self-service /me/fee-statement', async () => {
+      const res = await request(app.getHttpServer())
+        .get('/api/v1/students/me/fee-statement')
+        .set('Authorization', `Bearer ${tokenSchoolAStudent}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.student.id).toBe(studentAId);
+      expect(res.body.student.admissionNumber).toBe('ADM-2026-001');
+      expect(res.body.invoices.length).toBe(12);
+    });
+
+    it('returns only the authenticated student profile via /students/accessible for STUDENT role', async () => {
+      const res = await request(app.getHttpServer())
+        .get('/api/v1/students/accessible')
+        .set('Authorization', `Bearer ${tokenSchoolAStudent}`);
+
+      expect(res.status).toBe(200);
+      expect(Array.isArray(res.body)).toBe(true);
+      expect(res.body.length).toBe(1);
+      expect(res.body[0].id).toBe(studentAId);
+    });
+
     it('forbids student user from accessing another student fee statement (403 Forbidden)', async () => {
       const res = await request(app.getHttpServer())
         .get(`/api/v1/students/${studentPctId}/fee-statement`)
@@ -632,6 +722,366 @@ describe('Phase 2C: Monthly Fee Generation Engine (e2e)', () => {
         });
 
       expect(res.status).toBe(404);
+    });
+  });
+
+  describe('5. Verified Parent-Student Relationship Model (SEC-03)', () => {
+    it('allows verified parent to view their linked child statement', async () => {
+      const res = await request(app.getHttpServer())
+        .get(`/api/v1/students/${studentAId}/fee-statement`)
+        .set('Authorization', `Bearer ${tokenSchoolAParent}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.student.id).toBe(studentAId);
+      expect(res.body.student.admissionNumber).toBe('ADM-2026-001');
+    });
+
+    it('allows verified parent to use self-service /students/me/fee-statement', async () => {
+      const res = await request(app.getHttpServer())
+        .get('/api/v1/students/me/fee-statement')
+        .set('Authorization', `Bearer ${tokenSchoolAParent}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.student.id).toBe(studentAId);
+    });
+
+    it('returns only verified linked children in /students/accessible for PARENT', async () => {
+      const res = await request(app.getHttpServer())
+        .get('/api/v1/students/accessible')
+        .set('Authorization', `Bearer ${tokenSchoolAParent}`);
+
+      expect(res.status).toBe(200);
+      expect(Array.isArray(res.body)).toBe(true);
+      expect(res.body.length).toBe(1);
+      expect(res.body[0].id).toBe(studentAId);
+    });
+
+    it('forbids verified parent from accessing another unlinked student fee statement (403 Forbidden)', async () => {
+      const res = await request(app.getHttpServer())
+        .get(`/api/v1/students/${studentPctId}/fee-statement`)
+        .set('Authorization', `Bearer ${tokenSchoolAParent}`);
+
+      expect(res.status).toBe(403);
+      expect(res.body.message).toContain('Access denied');
+    });
+
+    it('forbids unlinked parent without a verified relationship from accessing student (403 Forbidden)', async () => {
+      const res = await request(app.getHttpServer())
+        .get(`/api/v1/students/${studentAId}/fee-statement`)
+        .set('Authorization', `Bearer ${tokenSchoolAUnlinkedParent}`);
+
+      expect(res.status).toBe(403);
+      expect(res.body.message).toContain('Access denied');
+    });
+
+    it('returns empty array from /students/accessible for unlinked parent', async () => {
+      const res = await request(app.getHttpServer())
+        .get('/api/v1/students/accessible')
+        .set('Authorization', `Bearer ${tokenSchoolAUnlinkedParent}`);
+
+      expect(res.status).toBe(200);
+      expect(Array.isArray(res.body)).toBe(true);
+      expect(res.body.length).toBe(0);
+    });
+
+    it('returns 404 from /students/me/fee-statement for unlinked parent', async () => {
+      const res = await request(app.getHttpServer())
+        .get('/api/v1/students/me/fee-statement')
+        .set('Authorization', `Bearer ${tokenSchoolAUnlinkedParent}`);
+
+      expect(res.status).toBe(404);
+      expect(res.body.message).toContain('No verified student profiles linked');
+    });
+  });
+
+  describe('6. School Timezone & Invoice Due-Date Calculations (TIME-01, TIME-02)', () => {
+    it('verifies generated due date is pegged to 23:59:59.999 local school time (Asia/Kolkata)', async () => {
+      const invoice = await prisma.feeInvoice.findFirst({
+        where: { schoolId: schoolAId, studentId: studentAId, billingMonth: 1 },
+      });
+
+      expect(invoice).toBeDefined();
+      const dueDateIso = invoice!.dueDate.toISOString();
+      // In Asia/Kolkata (UTC+5:30), 23:59:59.999 corresponds to 18:29:59.999 UTC
+      expect(dueDateIso).toContain('18:29:59.999Z');
+
+      // Local string formatting in en-IN must render strictly on the 10th of April, NOT the 11th!
+      const formattedDate = invoice!.dueDate.toLocaleDateString('en-IN', {
+        timeZone: 'Asia/Kolkata',
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric',
+      });
+      expect(formattedDate).toContain('10');
+      expect(formattedDate).not.toContain('11');
+    });
+
+    it('verifies dynamic invoice status state machine transitions', () => {
+      const sessionStart = new Date('2026-04-01T00:00:00.000Z');
+      const fakeAcademicYear: any = { startDate: sessionStart };
+
+      // April due date in Asia/Kolkata: 2026-04-10T18:29:59.999Z (10 Apr 23:59:59.999 IST)
+      const aprilDueDate = feeGenerationService.getDueDateForBillingMonth(fakeAcademicYear, 1, 'Asia/Kolkata');
+      expect(aprilDueDate.toISOString()).toBe('2026-04-10T18:29:59.999Z');
+
+      // 1. Before billing cycle opens (e.g. March 25, 2026) -> UPCOMING
+      const beforeCycle = new Date('2026-03-25T12:00:00.000Z');
+      expect(feeGenerationService.deriveCurrentInvoiceStatus(InvoiceStatus.UPCOMING, aprilDueDate, beforeCycle)).toBe(InvoiceStatus.UPCOMING);
+
+      // 2. During billing cycle before due date (e.g. April 5, 2026) -> DUE
+      const duringCycle = new Date('2026-04-05T12:00:00.000Z');
+      expect(feeGenerationService.deriveCurrentInvoiceStatus(InvoiceStatus.UPCOMING, aprilDueDate, duringCycle)).toBe(InvoiceStatus.DUE);
+
+      // 3. Exactly at the due date deadline (10 Apr 2026, 23:59:59 IST = 18:29:59.999 UTC) -> DUE
+      const atDueDeadline = new Date('2026-04-10T18:29:59.999Z');
+      expect(feeGenerationService.deriveCurrentInvoiceStatus(InvoiceStatus.UPCOMING, aprilDueDate, atDueDeadline)).toBe(InvoiceStatus.DUE);
+
+      // 4. During 5-day grace period (e.g. April 14, 2026) -> DUE
+      const duringGrace = new Date('2026-04-14T12:00:00.000Z');
+      expect(feeGenerationService.deriveCurrentInvoiceStatus(InvoiceStatus.UPCOMING, aprilDueDate, duringGrace)).toBe(InvoiceStatus.DUE);
+
+      // 5. At end of 5-day grace period (15 Apr 2026, 23:59:59 IST = 15 Apr 18:29:59.999 UTC) -> DUE
+      const atGraceDeadline = new Date('2026-04-15T18:29:59.999Z');
+      expect(feeGenerationService.deriveCurrentInvoiceStatus(InvoiceStatus.UPCOMING, aprilDueDate, atGraceDeadline)).toBe(InvoiceStatus.DUE);
+
+      // 6. After grace period (e.g. April 16, 2026 00:00:01 IST = 15 Apr 18:30:01 UTC) -> OVERDUE
+      const afterGrace = new Date('2026-04-15T18:30:01.000Z');
+      expect(feeGenerationService.deriveCurrentInvoiceStatus(InvoiceStatus.UPCOMING, aprilDueDate, afterGrace)).toBe(InvoiceStatus.OVERDUE);
+
+      // 7. VOID invoice is permanently VOID regardless of date
+      expect(feeGenerationService.deriveCurrentInvoiceStatus(InvoiceStatus.VOID, aprilDueDate, afterGrace)).toBe(InvoiceStatus.VOID);
+    });
+  });
+
+  describe('7. ONE_TIME Fee Frequency Cross-Session Non-Duplication (FIN-01)', () => {
+    let admissionFeeHeadId: string;
+    let nextAcademicYearId: string;
+    let testStudentId: string;
+
+    it('creates a ONE_TIME Admission Fee head and sets up student for session 1', async () => {
+      const head = await prisma.feeHead.create({
+        data: {
+          schoolId: schoolAId,
+          name: 'One-Time Admission Fee',
+          code: 'ADM-ONETIME',
+          category: FeeHeadCategory.INSTITUTIONAL,
+          description: 'Non-recurring admission fee for new joiners',
+        },
+      });
+      admissionFeeHeadId = head.id;
+
+      const section = await prisma.section.findFirst({ where: { schoolId: schoolAId, gradeId: gradeAId } });
+      const stu = await prisma.student.create({
+        data: {
+          schoolId: schoolAId,
+          academicYearId: sessionAId,
+          gradeId: gradeAId,
+          sectionId: section!.id,
+          admissionNumber: 'ADM-2C-ONETIME-01',
+          firstName: 'Rohit',
+          lastName: 'Verma',
+        },
+      });
+      testStudentId = stu.id;
+
+      // Create fee structure with Monthly Tuition and ONE_TIME Admission Fee
+      const struct = await prisma.feeStructure.create({
+        data: {
+          schoolId: schoolAId,
+          academicYearId: sessionAId,
+          gradeId: gradeAId,
+          name: 'Grade 10 with Admission Fee 2026-27',
+        },
+      });
+      await prisma.feeStructureItem.createMany({
+        data: [
+          {
+            schoolId: schoolAId,
+            feeStructureId: struct.id,
+            feeHeadId: tuitionHeadId,
+            amount: 4000.0,
+            frequency: FeeFrequency.MONTHLY,
+          },
+          {
+            schoolId: schoolAId,
+            feeStructureId: struct.id,
+            feeHeadId: admissionFeeHeadId,
+            amount: 15000.0,
+            frequency: FeeFrequency.ONE_TIME,
+          },
+        ],
+      });
+
+      // Allocate to test student for Session 1 (starting month 1)
+      await prisma.studentFeeAllocation.create({
+        data: {
+          schoolId: schoolAId,
+          studentId: testStudentId,
+          academicYearId: sessionAId,
+          feeStructureId: struct.id,
+          startBillingMonth: 1,
+        },
+      });
+    });
+
+    it('generates fees for Session 1 and bills ONE_TIME Admission Fee in Month 1 only', async () => {
+      // Execute fee generation for Session 1
+      const execRes = await request(app.getHttpServer())
+        .post('/api/v1/fee-generation/execute')
+        .set('Authorization', `Bearer ${tokenSchoolAAdmin}`)
+        .send({ academicYearId: sessionAId });
+
+      expect(execRes.status).toBe(201);
+
+      // Verify Month 1 invoice includes Admission Fee
+      const m1 = await prisma.feeInvoice.findFirst({
+        where: { schoolId: schoolAId, studentId: testStudentId, academicYearId: sessionAId, billingMonth: 1 },
+        include: { items: true },
+      });
+      expect(m1).toBeDefined();
+      expect(Number(m1!.grossAmount)).toBe(19000); // 4000 + 15000
+      const admItem = m1!.items.find((it) => it.feeHeadId === admissionFeeHeadId);
+      expect(admItem).toBeDefined();
+      expect(Number(admItem!.grossAmount)).toBe(15000);
+      expect(admItem!.billingFrequencySnapshot).toBe(FeeFrequency.ONE_TIME);
+
+      // Verify Months 2-12 do NOT include Admission Fee
+      const m2 = await prisma.feeInvoice.findFirst({
+        where: { schoolId: schoolAId, studentId: testStudentId, academicYearId: sessionAId, billingMonth: 2 },
+        include: { items: true },
+      });
+      expect(m2).toBeDefined();
+      expect(Number(m2!.grossAmount)).toBe(4000);
+      expect(m2!.items.length).toBe(1);
+
+      // Verify StudentOneTimeFeeBilling record is durably persisted
+      const oneTimeRecord = await prisma.studentOneTimeFeeBilling.findUnique({
+        where: {
+          schoolId_studentId_feeHeadId: {
+            schoolId: schoolAId,
+            studentId: testStudentId,
+            feeHeadId: admissionFeeHeadId,
+          },
+        },
+      });
+      expect(oneTimeRecord).toBeDefined();
+      expect(oneTimeRecord!.academicYearId).toBe(sessionAId);
+    });
+
+    it('creates Session 2 (2027-2028), re-allocates student with structure containing Admission Fee, and verifies non-duplication', async () => {
+      // Find or create Session 2
+      let nextSession = await prisma.academicYear.findFirst({
+        where: {
+          schoolId: schoolAId,
+          name: 'Academic Year 2027-2028',
+        },
+      });
+      if (!nextSession) {
+        nextSession = await prisma.academicYear.create({
+          data: {
+            schoolId: schoolAId,
+            name: 'Academic Year 2027-2028',
+            startDate: new Date('2027-04-01T00:00:00.000Z'),
+            endDate: new Date('2028-03-31T23:59:59.999Z'),
+            isCurrent: false,
+          },
+        });
+      }
+      nextAcademicYearId = nextSession.id;
+
+      // Clean any residual Session 2 test data from previous runs
+      await prisma.feeInvoice.deleteMany({ where: { schoolId: schoolAId, academicYearId: nextAcademicYearId } });
+      await prisma.studentFeeAllocation.deleteMany({ where: { schoolId: schoolAId, academicYearId: nextAcademicYearId } });
+      await prisma.feeStructureItem.deleteMany({ where: { schoolId: schoolAId, feeStructure: { academicYearId: nextAcademicYearId } } });
+      await prisma.feeStructure.deleteMany({ where: { schoolId: schoolAId, academicYearId: nextAcademicYearId } });
+
+      // Create fee structure for Session 2 that also includes the ONE_TIME Admission Fee
+      const struct2 = await prisma.feeStructure.create({
+        data: {
+          schoolId: schoolAId,
+          academicYearId: nextAcademicYearId,
+          gradeId: gradeAId,
+          name: 'Grade 10 with Admission Fee 2027-28',
+        },
+      });
+      await prisma.feeStructureItem.createMany({
+        data: [
+          {
+            schoolId: schoolAId,
+            feeStructureId: struct2.id,
+            feeHeadId: tuitionHeadId,
+            amount: 4500.0,
+            frequency: FeeFrequency.MONTHLY,
+          },
+          {
+            schoolId: schoolAId,
+            feeStructureId: struct2.id,
+            feeHeadId: admissionFeeHeadId,
+            amount: 15000.0,
+            frequency: FeeFrequency.ONE_TIME,
+          },
+        ],
+      });
+
+      // Allocate student for Session 2
+      await prisma.studentFeeAllocation.create({
+        data: {
+          schoolId: schoolAId,
+          studentId: testStudentId,
+          academicYearId: nextAcademicYearId,
+          feeStructureId: struct2.id,
+          startBillingMonth: 1,
+        },
+      });
+
+      // Preview Session 2: verifies Admission Fee is excluded from projected totals
+      const previewRes = await request(app.getHttpServer())
+        .post('/api/v1/fee-generation/preview')
+        .set('Authorization', `Bearer ${tokenSchoolAAdmin}`)
+        .send({ academicYearId: nextAcademicYearId });
+
+      expect(previewRes.status).toBe(201);
+      // 12 months * 4500 monthly tuition = 54000. Admission Fee (15000) must NOT be added!
+      expect(previewRes.body.projectedGrossTotal).toBe(54000);
+
+      // Execute Session 2
+      const execRes2 = await request(app.getHttpServer())
+        .post('/api/v1/fee-generation/execute')
+        .set('Authorization', `Bearer ${tokenSchoolAAdmin}`)
+        .send({ academicYearId: nextAcademicYearId });
+
+      expect(execRes2.status).toBe(201);
+      expect(execRes2.body.totalGrossAmount).toBe(54000);
+
+      // Verify Session 2 Month 1 invoice does NOT contain Admission Fee
+      const m1S2 = await prisma.feeInvoice.findFirst({
+        where: { schoolId: schoolAId, studentId: testStudentId, academicYearId: nextAcademicYearId, billingMonth: 1 },
+        include: { items: true },
+      });
+      expect(m1S2).toBeDefined();
+      expect(Number(m1S2!.grossAmount)).toBe(4500); // ONLY monthly tuition!
+      const admItemS2 = m1S2!.items.find((it) => it.feeHeadId === admissionFeeHeadId);
+      expect(admItemS2).toBeUndefined(); // STRICTLY excluded
+
+      // Check all 12 invoices in Session 2: none contain Admission Fee
+      const allS2Invoices = await prisma.feeInvoice.findMany({
+        where: { schoolId: schoolAId, studentId: testStudentId, academicYearId: nextAcademicYearId },
+        include: { items: true },
+      });
+      expect(allS2Invoices.length).toBe(12);
+      for (const inv of allS2Invoices) {
+        expect(inv.items.some((it) => it.feeHeadId === admissionFeeHeadId)).toBe(false);
+      }
+
+      // Verify StudentOneTimeFeeBilling still has exactly 1 record for this student and feeHead
+      const count = await prisma.studentOneTimeFeeBilling.count({
+        where: {
+          schoolId: schoolAId,
+          studentId: testStudentId,
+          feeHeadId: admissionFeeHeadId,
+        },
+      });
+      expect(count).toBe(1);
     });
   });
 });

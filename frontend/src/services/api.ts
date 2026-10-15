@@ -297,6 +297,10 @@ export const metaApi = {
     const res = await api.get<Student[]>('/students');
     return res.data;
   },
+  getAccessibleStudents: async () => {
+    const res = await api.get<Student[]>('/students/accessible');
+    return res.data;
+  },
   getGrades: async () => {
     const res = await api.get<GradeClass[]>('/students/meta/grades');
     return res.data;
@@ -456,6 +460,12 @@ export const feeGenerationApi = {
 export const feeStatementApi = {
   getStatement: async (studentId: string, academicYearId?: string) => {
     const res = await api.get<StudentFeeStatement>(`/students/${studentId}/fee-statement`, {
+      params: academicYearId ? { academicYearId } : undefined,
+    });
+    return res.data;
+  },
+  getMyStatement: async (academicYearId?: string) => {
+    const res = await api.get<StudentFeeStatement>('/students/me/fee-statement', {
       params: academicYearId ? { academicYearId } : undefined,
     });
     return res.data;

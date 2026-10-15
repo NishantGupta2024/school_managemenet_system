@@ -42,7 +42,7 @@ export const StudentStatementView: React.FC = () => {
   const loadMetadata = async () => {
     try {
       const [stuList, yearList] = await Promise.all([
-        metaApi.getStudents(),
+        metaApi.getAccessibleStudents(),
         metaApi.getAcademicYears(),
       ]);
       setStudents(stuList);
@@ -187,13 +187,18 @@ export const StudentStatementView: React.FC = () => {
             <select
               value={selectedStudentId}
               onChange={(e) => handleStudentSelect(e.target.value)}
-              className="w-full text-sm rounded-xl border border-slate-300 px-3 py-2 bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600"
+              disabled={filteredStudents.length === 0}
+              className="w-full text-sm rounded-xl border border-slate-300 px-3 py-2 bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 disabled:bg-slate-50 disabled:text-slate-400"
             >
-              {filteredStudents.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.admissionNumber} — {s.firstName} {s.lastName} ({s.grade?.name || 'Class'})
-                </option>
-              ))}
+              {filteredStudents.length === 0 ? (
+                <option value="">No students available</option>
+              ) : (
+                filteredStudents.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.admissionNumber} — {s.firstName} {s.lastName} ({s.grade?.name || 'Class'})
+                  </option>
+                ))
+              )}
             </select>
           </div>
 

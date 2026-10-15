@@ -98,6 +98,15 @@ vi.mock('./services/api', () => ({
         grade: { name: 'Grade 10' },
       },
     ]),
+    getAccessibleStudents: vi.fn().mockResolvedValue([
+      {
+        id: 'stud-1',
+        admissionNumber: 'ADM-2026-001',
+        firstName: 'Aarav',
+        lastName: 'Sharma',
+        grade: { name: 'Grade 10' },
+      },
+    ]),
     getGrades: vi.fn().mockResolvedValue([{ id: 'g10', name: 'Grade 10', code: 'G10' }]),
     getAcademicYears: vi.fn().mockResolvedValue([{ id: 'y26', name: '2026-2027', isCurrent: true }]),
   },
