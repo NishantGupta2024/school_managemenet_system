@@ -5,6 +5,35 @@ import App from './App';
 vi.mock('./services/api', () => ({
   DEFAULT_TENANT_ID: '00000000-0000-0000-0000-000000000001',
   DEFAULT_SCHOOL_CODE: 'SCH001',
+  UserRole: {
+    PLATFORM_SUPER_ADMIN: 'PLATFORM_SUPER_ADMIN',
+    SCHOOL_ADMIN: 'SCHOOL_ADMIN',
+    FEE_STAFF: 'FEE_STAFF',
+    STUDENT: 'STUDENT',
+    PARENT: 'PARENT',
+  },
+  setActiveSchoolId: vi.fn(),
+  setOnUnauthorized: vi.fn(),
+  authApi: {
+    login: vi.fn(),
+    logout: vi.fn(),
+    getToken: vi.fn().mockReturnValue('mock-jwt-token'),
+    getUser: vi.fn().mockReturnValue({
+      id: 'mock-user-1',
+      email: 'admin@school.com',
+      name: 'Admin User',
+      role: 'SCHOOL_ADMIN',
+      schoolId: '00000000-0000-0000-0000-000000000001',
+      schoolName: 'Greenwood Intl Academy',
+    }),
+    getProfile: vi.fn().mockResolvedValue({
+      id: 'mock-user-1',
+      email: 'admin@school.com',
+      name: 'Admin User',
+      role: 'SCHOOL_ADMIN',
+      schoolId: '00000000-0000-0000-0000-000000000001',
+    }),
+  },
   fetchSystemHealth: vi.fn().mockResolvedValue({
     status: 'ok',
     timestamp: new Date().toISOString(),
@@ -190,7 +219,7 @@ vi.mock('./services/api', () => ({
 describe('App Component', () => {
   it('renders application header and title', async () => {
     render(<App />);
-    const titleElements = screen.getAllByText(/School Fee Management System/i);
+    const titleElements = await screen.findAllByText(/School Fee Management System/i);
     expect(titleElements.length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText(/Phase 1 Architecture Foundation Completed/i)).toBeInTheDocument();
     await waitFor(() => {
@@ -200,7 +229,7 @@ describe('App Component', () => {
 
   it('renders infrastructure telemetry cards', async () => {
     render(<App />);
-    expect(screen.getByText(/System Health & Infrastructure Telemetry/i)).toBeInTheDocument();
+    expect(await screen.findByText(/System Health & Infrastructure Telemetry/i)).toBeInTheDocument();
     expect(screen.getByText(/Frontend Tier/i)).toBeInTheDocument();
     const gatewayElements = screen.getAllByText(/API Gateway/i);
     expect(gatewayElements.length).toBeGreaterThanOrEqual(1);
@@ -212,7 +241,7 @@ describe('App Component', () => {
 
   it('renders Phase Foundation deliverables checklist', async () => {
     render(<App />);
-    expect(screen.getByText(/Phase Foundation & Fee Engine Deliverables/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Phase Foundation & Fee Engine Deliverables/i)).toBeInTheDocument();
     expect(screen.getByText(/Clean Monorepo Workspace/i)).toBeInTheDocument();
     expect(screen.getByText(/Tenant Context Isolation/i)).toBeInTheDocument();
     await waitFor(() => {
@@ -222,7 +251,7 @@ describe('App Component', () => {
 
   it('navigates to Fee Heads tab when clicked', async () => {
     render(<App />);
-    const tabBtn = screen.getByRole('button', { name: /^Fee Heads$/i });
+    const tabBtn = await screen.findByRole('button', { name: /^Fee Heads$/i });
     fireEvent.click(tabBtn);
 
     await waitFor(() => {
@@ -234,7 +263,7 @@ describe('App Component', () => {
 
   it('navigates to Fee Structures tab when clicked', async () => {
     render(<App />);
-    const tabBtn = screen.getByRole('button', { name: /^Fee Structures$/i });
+    const tabBtn = await screen.findByRole('button', { name: /^Fee Structures$/i });
     fireEvent.click(tabBtn);
 
     await waitFor(() => {
@@ -245,7 +274,7 @@ describe('App Component', () => {
 
   it('navigates to Student Allocations tab when clicked', async () => {
     render(<App />);
-    const tabBtn = screen.getByRole('button', { name: /^Student Allocations$/i });
+    const tabBtn = await screen.findByRole('button', { name: /^Student Allocations$/i });
     fireEvent.click(tabBtn);
 
     await waitFor(() => {
@@ -257,6 +286,7 @@ describe('App Component', () => {
 
   it('navigates to Monthly Invoicing tab when clicked', async () => {
     render(<App />);
+    await screen.findByText(/Phase Foundation & Fee Engine Deliverables/i);
     const tabBtns = screen.getAllByRole('button', { name: /Monthly Invoicing/i });
     fireEvent.click(tabBtns[0]);
 
@@ -268,6 +298,7 @@ describe('App Component', () => {
 
   it('navigates to Fee Statements tab when clicked', async () => {
     render(<App />);
+    await screen.findByText(/Phase Foundation & Fee Engine Deliverables/i);
     const tabBtns = screen.getAllByRole('button', { name: /Fee Statements/i });
     fireEvent.click(tabBtns[0]);
 
@@ -279,6 +310,7 @@ describe('App Component', () => {
 
   it('navigates to Excel Imports tab when clicked', async () => {
     render(<App />);
+    await screen.findByText(/Phase Foundation & Fee Engine Deliverables/i);
     const tabBtns = screen.getAllByRole('button', { name: /Excel Imports/i });
     fireEvent.click(tabBtns[0]);
 
@@ -291,6 +323,7 @@ describe('App Component', () => {
 
   it('navigates to Fine Rules tab when clicked', async () => {
     render(<App />);
+    await screen.findByText(/Phase Foundation & Fee Engine Deliverables/i);
     const tabBtns = screen.getAllByRole('button', { name: /Fine Rules/i });
     fireEvent.click(tabBtns[0]);
 

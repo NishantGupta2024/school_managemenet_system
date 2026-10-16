@@ -1,26 +1,75 @@
 import axios from 'axios';
 
-// Current active school/tenant
+// Default fallbacks for legacy/display references only
 export const DEFAULT_TENANT_ID = '00000000-0000-0000-0000-000000000001';
 export const DEFAULT_SCHOOL_CODE = 'SCH001';
+
+// Dynamic tenant context and 401 callback in memory
+let activeSchoolId: string | null = null;
+let onUnauthorizedHandler: (() => void) | null = null;
+
+export function setActiveSchoolId(schoolId: string | null) {
+  activeSchoolId = schoolId;
+}
+
+export function setOnUnauthorized(handler: (() => void) | null) {
+  onUnauthorizedHandler = handler;
+}
+
+export const UserRole = {
+  PLATFORM_SUPER_ADMIN: 'PLATFORM_SUPER_ADMIN',
+  SCHOOL_ADMIN: 'SCHOOL_ADMIN',
+  FEE_STAFF: 'FEE_STAFF',
+  STUDENT: 'STUDENT',
+  PARENT: 'PARENT',
+} as const;
+
+export type UserRole = (typeof UserRole)[keyof typeof UserRole];
 
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL || '/api/v1',
   timeout: 10000,
   headers: {
     'Content-Type': 'application/json',
-    'x-school-id': DEFAULT_TENANT_ID,
   },
 });
 
-// Attach Bearer token from localStorage if present
+// Request interceptor: attach bearer token and dynamic tenant context
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('auth_token');
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
+
+  // Determine if request is public (login, health)
+  const isPublicEndpoint =
+    config.url?.includes('/auth/login') || config.url?.includes('/health');
+
+  if (!isPublicEndpoint && activeSchoolId) {
+    config.headers['x-school-id'] = activeSchoolId;
+  } else if (config.headers['x-school-id']) {
+    delete config.headers['x-school-id'];
+  }
+
   return config;
 });
+
+// Response interceptor: global 401 handling for expired/invalid sessions
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    const isLoginRequest = error.config?.url?.includes('/auth/login');
+    if (error.response?.status === 401 && !isLoginRequest) {
+      localStorage.removeItem('auth_token');
+      localStorage.removeItem('auth_user');
+      if (onUnauthorizedHandler) {
+        onUnauthorizedHandler();
+      }
+    }
+    // 403 Forbidden is NOT treated as an expired session; let callers handle permission rejection
+    return Promise.reject(error);
+  },
+);
 
 // Types & Interfaces
 export type FeeHeadCategory = 'ACADEMIC' | 'FACILITY' | 'INSTITUTIONAL' | 'ACTIVITY' | 'MISCELLANEOUS';
@@ -155,10 +204,24 @@ export const authApi = {
     localStorage.removeItem('auth_user');
   },
   getUser: () => {
-    const stored = localStorage.getItem('auth_user');
-    return stored ? JSON.parse(stored) : null;
+    try {
+      const stored = localStorage.getItem('auth_user');
+      return stored ? JSON.parse(stored) : null;
+    } catch {
+      return null;
+    }
   },
   getToken: () => localStorage.getItem('auth_token'),
+  getProfile: async () => {
+    const res = await api.get<{
+      id: string;
+      email: string;
+      name: string;
+      role: UserRole;
+      schoolId: string | null;
+    }>('/auth/me');
+    return res.data;
+  },
 };
 
 // Fee Heads API
