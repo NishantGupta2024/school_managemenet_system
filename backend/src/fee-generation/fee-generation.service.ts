@@ -139,6 +139,9 @@ export class FeeGenerationService {
     if (status === InvoiceStatus.VOID) {
       return InvoiceStatus.VOID;
     }
+    if (status === InvoiceStatus.PAID || status === InvoiceStatus.PARTIALLY_PAID) {
+      return status;
+    }
 
     const dueTime = dueDate.getTime();
     const currentTime = asOfDate.getTime();
@@ -892,11 +895,13 @@ export class FeeGenerationService {
     let totalDiscount = new Prisma.Decimal(0);
     let totalNet = new Prisma.Decimal(0);
     let totalFinePreview = new Prisma.Decimal(0);
-    const statusBreakdown = {
+    const statusBreakdown: Record<string, number> = {
       UPCOMING: 0,
       DUE: 0,
       OVERDUE: 0,
       VOID: 0,
+      PARTIALLY_PAID: 0,
+      PAID: 0,
     };
 
     const formattedInvoices = invoices.map((inv) => {
@@ -918,14 +923,17 @@ export class FeeGenerationService {
       );
       statusBreakdown[derivedStatus] = (statusBreakdown[derivedStatus] || 0) + 1;
 
-      const fineBreakdown = this.fineRulesService
-        ? this.fineRulesService.evaluateFineCalculation({
-            invoice: inv,
-            rule: matchedRule,
-            asOfDate: now,
-            timeZone: timezone,
-          })
-        : null;
+      const fineBreakdown =
+        this.fineRulesService &&
+        derivedStatus !== InvoiceStatus.VOID &&
+        derivedStatus !== InvoiceStatus.PAID
+          ? this.fineRulesService.evaluateFineCalculation({
+              invoice: inv,
+              rule: matchedRule,
+              asOfDate: now,
+              timeZone: timezone,
+            })
+          : null;
 
       totalGross = totalGross.add(inv.grossAmount);
       totalDiscount = totalDiscount.add(inv.discountAmount);

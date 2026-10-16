@@ -73,7 +73,58 @@ enum InvoiceStatus {
   UPCOMING
   DUE
   OVERDUE
+  PARTIALLY_PAID
+  PAID
   VOID
+}
+
+enum PaymentMethod {
+  CASH
+  CHEQUE
+  BANK_TRANSFER
+  UPI
+  POS_CARD
+  DEMAND_DRAFT
+  OTHER
+}
+
+enum PaymentStatus {
+  COMPLETED
+  VOIDED
+  BOUNCED
+  PARTIALLY_REFUNDED
+  REFUNDED
+}
+
+enum AllocationType {
+  PRINCIPAL
+  FINE
+  REVERSAL
+}
+
+enum ReceiptStatus {
+  ACTIVE
+  CANCELLED
+}
+
+enum ReversalType {
+  VOID
+  BOUNCE
+  CORRECTION
+}
+
+enum RefundStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+  CANCELLED
+}
+
+enum AssessedFineStatus {
+  OUTSTANDING
+  PARTIALLY_PAID
+  PAID
+  WAIVED
 }
 
 enum FineType {
@@ -124,6 +175,16 @@ model School {
   parentStudentRelations    ParentStudentRelation[]
   studentOneTimeFeeBillings StudentOneTimeFeeBilling[]
   fineRules                 FineRule[]
+  payments                  Payment[]
+  paymentAllocations        PaymentAllocation[]
+  receiptSequenceCounters   ReceiptSequenceCounter[]
+  assessedFines             AssessedFine[]
+  fineWaivers               FineWaiver[]
+  receipts                  Receipt[]
+  paymentRefunds            PaymentRefund[]
+  paymentRefundAllocations  PaymentRefundAllocation[]
+  paymentReversals          PaymentReversal[]
+  reversalSequenceCounters  ReversalSequenceCounter[]
 
   @@map("schools")
 }
@@ -142,13 +203,19 @@ model User {
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
 
-  school                School?                 @relation(fields: [schoolId], references: [id], onDelete: Cascade)
-  authorizedAllocations StudentFeeAllocation[]
-  feeGenerationRuns     FeeGenerationRun[]
-  studentProfile        Student?                @relation("StudentUserAccount")
-  parentRelations       ParentStudentRelation[]
-  createdFineRules      FineRule[]              @relation("FineRuleCreatedBy")
-  updatedFineRules      FineRule[]              @relation("FineRuleUpdatedBy")
+  school                     School?                 @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  authorizedAllocations      StudentFeeAllocation[]
+  feeGenerationRuns          FeeGenerationRun[]
+  studentProfile             Student?                @relation("StudentUserAccount")
+  parentRelations            ParentStudentRelation[]
+  createdFineRules           FineRule[]              @relation("FineRuleCreatedBy")
+  updatedFineRules           FineRule[]              @relation("FineRuleUpdatedBy")
+  collectedPayments          Payment[]               @relation("PaymentCollectedBy")
+  cancelledPayments          Payment[]               @relation("PaymentCancelledBy")
+  authorizedFineWaivers      FineWaiver[]            @relation("FineWaiverAuthorizedBy")
+  authorizedRefunds          PaymentRefund[]         @relation("PaymentRefundAuthorizedBy")
+  processedRefunds           PaymentRefund[]         @relation("PaymentRefundProcessedBy")
+  authorizedPaymentReversals PaymentReversal[]       @relation("PaymentReversalAuthorizedBy")
 
   @@unique([schoolId, email])
   @@index([schoolId])
@@ -168,14 +235,18 @@ model AcademicYear {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  school                School                     @relation(fields: [schoolId], references: [id], onDelete: Cascade)
-  students              Student[]
-  feeStructures         FeeStructure[]
-  studentFeeAllocations StudentFeeAllocation[]
-  invoices              FeeInvoice[]
-  feeGenerationRuns     FeeGenerationRun[]
-  oneTimeBillings       StudentOneTimeFeeBilling[]
-  fineRules             FineRule[]
+  school                  School                     @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  students                Student[]
+  feeStructures           FeeStructure[]
+  studentFeeAllocations   StudentFeeAllocation[]
+  invoices                FeeInvoice[]
+  feeGenerationRuns       FeeGenerationRun[]
+  oneTimeBillings         StudentOneTimeFeeBilling[]
+  fineRules               FineRule[]
+  payments                Payment[]
+  receiptSequenceCounters ReceiptSequenceCounter[]
+  receipts                Receipt[]
+  reversalSequenceCounters ReversalSequenceCounter[]
 
   @@unique([schoolId, name])
   @@unique([schoolId, id]) // Required for composite foreign key constraint
@@ -262,6 +333,7 @@ model Student {
   invoices        FeeInvoice[]
   parentRelations ParentStudentRelation[]
   oneTimeBillings StudentOneTimeFeeBilling[]
+  payments        Payment[]
 
   @@unique([schoolId, admissionNumber])
   @@unique([schoolId, id])
@@ -422,10 +494,13 @@ model FeeInvoice {
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
 
-  school       School        @relation(fields: [schoolId], references: [id], onDelete: Cascade)
-  student      Student       @relation(fields: [schoolId, studentId], references: [schoolId, id], onDelete: Cascade)
-  academicYear AcademicYear  @relation(fields: [schoolId, academicYearId], references: [schoolId, id], onDelete: Cascade)
+  school       School              @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  student      Student             @relation(fields: [schoolId, studentId], references: [schoolId, id], onDelete: Cascade)
+  academicYear AcademicYear        @relation(fields: [schoolId, academicYearId], references: [schoolId, id], onDelete: Cascade)
   items        InvoiceItem[]
+  paymentAllocations PaymentAllocation[]
+  assessedFines      AssessedFine[]
+  fineWaivers        FineWaiver[]
 
   @@unique([schoolId, studentId, academicYearId, billingMonth])
   @@unique([schoolId, id])
@@ -441,20 +516,21 @@ model FeeInvoice {
 // Invoice Item: Line-Item Snapshot within Monthly Invoice
 // -------------------------------------------------------------
 model InvoiceItem {
-  id                       String       @id @default(uuid())
+  id                       String              @id @default(uuid())
   schoolId                 String
   invoiceId                String
   feeHeadId                String
   feeHeadNameSnapshot      String
-  grossAmount              Decimal      @db.Decimal(12, 2)
-  discountAmount           Decimal      @db.Decimal(12, 2)
-  netAmount                Decimal      @db.Decimal(12, 2)
+  grossAmount              Decimal             @db.Decimal(12, 2)
+  discountAmount           Decimal             @db.Decimal(12, 2)
+  netAmount                Decimal             @db.Decimal(12, 2)
   billingFrequencySnapshot FeeFrequency
-  createdAt                DateTime     @default(now())
+  createdAt                DateTime            @default(now())
 
-  school  School     @relation(fields: [schoolId], references: [id], onDelete: Cascade)
-  invoice FeeInvoice @relation(fields: [schoolId, invoiceId], references: [schoolId, id], onDelete: Cascade)
-  feeHead FeeHead    @relation(fields: [schoolId, feeHeadId], references: [schoolId, id], onDelete: Restrict)
+  school             School              @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  invoice            FeeInvoice          @relation(fields: [schoolId, invoiceId], references: [schoolId, id], onDelete: Cascade)
+  feeHead            FeeHead             @relation(fields: [schoolId, feeHeadId], references: [schoolId, id], onDelete: Restrict)
+  paymentAllocations PaymentAllocation[]
 
   @@unique([schoolId, id])
   @@index([schoolId])
@@ -571,8 +647,9 @@ model FineRule {
   school            School       @relation(fields: [schoolId], references: [id], onDelete: Cascade)
   academicYear      AcademicYear @relation(fields: [schoolId, academicYearId], references: [schoolId, id], onDelete: Cascade)
   applicableFeeHead FeeHead?     @relation(fields: [schoolId, applicableFeeHeadId], references: [schoolId, id], onDelete: Restrict)
-  createdBy         User?        @relation("FineRuleCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
-  updatedBy         User?        @relation("FineRuleUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: SetNull)
+  createdBy         User?          @relation("FineRuleCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  updatedBy         User?          @relation("FineRuleUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: SetNull)
+  assessedFines     AssessedFine[]
 
   @@unique([schoolId, academicYearId, name])
   @@unique([schoolId, id])
@@ -583,3 +660,306 @@ model FineRule {
   @@map("fine_rules")
 }
 
+// =============================================================
+// PHASE 2E: PAYMENT COLLECTION, ALLOCATION & RECEIPTS TIER
+// =============================================================
+
+// -------------------------------------------------------------
+// Receipt Sequence Counter: Atomic Monotonic Sequence Tracker
+// -------------------------------------------------------------
+model ReceiptSequenceCounter {
+  id             String       @id @default(uuid())
+  schoolId       String
+  academicYearId String
+  prefix         String       @default("RCT")
+  nextSequence   Int          @default(1)
+  updatedAt      DateTime     @updatedAt
+
+  school       School       @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  academicYear AcademicYear @relation(fields: [schoolId, academicYearId], references: [schoolId, id], onDelete: Cascade)
+
+  @@unique([schoolId, academicYearId])
+  @@unique([schoolId, id])
+  @@index([schoolId])
+  @@index([academicYearId])
+  @@map("receipt_sequence_counters")
+}
+
+// -------------------------------------------------------------
+// Reversal Sequence Counter: Atomic Monotonic Sequence Tracker for Reversals
+// -------------------------------------------------------------
+model ReversalSequenceCounter {
+  id             String       @id @default(uuid())
+  schoolId       String
+  academicYearId String
+  prefix         String       @default("REV")
+  nextSequence   Int          @default(1)
+  updatedAt      DateTime     @updatedAt
+
+  school       School       @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  academicYear AcademicYear @relation(fields: [schoolId, academicYearId], references: [schoolId, id], onDelete: Cascade)
+
+  @@unique([schoolId, academicYearId])
+  @@unique([schoolId, id])
+  @@index([schoolId])
+  @@index([academicYearId])
+  @@map("reversal_sequence_counters")
+}
+
+// -------------------------------------------------------------
+// Payment: Transaction Master Record
+// -------------------------------------------------------------
+model Payment {
+  id                 String        @id @default(uuid())
+  schoolId           String
+  studentId          String
+  academicYearId     String
+  paymentNumber      String        // e.g. "PAY-2026-00001"
+  paymentDate        DateTime      @default(now())
+  amount             Decimal       @db.Decimal(12, 2)
+  paymentMethod      PaymentMethod @default(CASH)
+  referenceNumber    String?       // UTR, UPI transaction ref, bank deposit ref
+  chequeNumber       String?
+  chequeDate         DateTime?
+  bankName           String?
+  notes              String?
+  status             PaymentStatus @default(COMPLETED)
+  idempotencyKey     String?
+  requestHash        String?       // SHA-256 hash of canonical request payload
+  collectedByUserId  String?
+  cancelledAt        DateTime?
+  cancelledByUserId  String?
+  cancellationReason String?
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+
+  school          School              @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  student         Student             @relation(fields: [schoolId, studentId], references: [schoolId, id], onDelete: Restrict)
+  academicYear    AcademicYear        @relation(fields: [schoolId, academicYearId], references: [schoolId, id], onDelete: Restrict)
+  collectedByUser User?               @relation("PaymentCollectedBy", fields: [collectedByUserId], references: [id], onDelete: SetNull)
+  cancelledByUser User?               @relation("PaymentCancelledBy", fields: [cancelledByUserId], references: [id], onDelete: SetNull)
+  allocations     PaymentAllocation[]
+  receipt         Receipt?
+  refunds         PaymentRefund[]
+  reversals       PaymentReversal[]
+
+  @@unique([schoolId, paymentNumber])
+  @@unique([schoolId, idempotencyKey])
+  @@unique([schoolId, id])
+  @@index([schoolId])
+  @@index([studentId])
+  @@index([academicYearId])
+  @@index([paymentDate])
+  @@index([status])
+  @@map("payments")
+}
+
+// -------------------------------------------------------------
+// Payment Allocation: Line-Item & Fine Settlement Ledger
+// -------------------------------------------------------------
+model PaymentAllocation {
+  id                     String             @id @default(uuid())
+  schoolId               String
+  paymentId              String
+  invoiceId              String
+  invoiceItemId          String?            // Null if allocation is for a late fine
+  assessedFineId         String?            // Null if allocation is for base fee item
+  reversalOfAllocationId String?            // References original allocation if this is a reversal
+  paymentReversalId      String?            // References PaymentReversal master record if this is a reversal
+  allocationType         AllocationType     @default(PRINCIPAL)
+  allocatedAmount        Decimal            @db.Decimal(12, 2)
+  createdAt              DateTime           @default(now())
+
+  school          School              @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  payment         Payment             @relation(fields: [schoolId, paymentId], references: [schoolId, id], onDelete: Restrict)
+  invoice         FeeInvoice          @relation(fields: [schoolId, invoiceId], references: [schoolId, id], onDelete: Restrict)
+  invoiceItem     InvoiceItem?        @relation(fields: [schoolId, invoiceItemId], references: [schoolId, id], onDelete: Restrict)
+  assessedFine    AssessedFine?       @relation(fields: [schoolId, assessedFineId], references: [schoolId, id], onDelete: Restrict)
+  reversalOf      PaymentAllocation?  @relation("AllocationReversals", fields: [schoolId, reversalOfAllocationId], references: [schoolId, id], onDelete: Restrict)
+  reversals         PaymentAllocation[]       @relation("AllocationReversals")
+  paymentReversal   PaymentReversal?          @relation(fields: [schoolId, paymentReversalId], references: [schoolId, id], onDelete: Restrict)
+  refundAllocations PaymentRefundAllocation[]
+
+  @@unique([schoolId, id])
+  @@index([schoolId])
+  @@index([paymentId])
+  @@index([invoiceId])
+  @@index([invoiceItemId])
+  @@index([assessedFineId])
+  @@index([reversalOfAllocationId])
+  @@index([paymentReversalId])
+  @@map("payment_allocations")
+}
+
+// -------------------------------------------------------------
+// Assessed Fine: Frozen Late Fine Obligation
+// -------------------------------------------------------------
+model AssessedFine {
+  id                  String             @id @default(uuid())
+  schoolId            String
+  invoiceId           String
+  fineRuleId          String?
+  assessedAmount      Decimal            @db.Decimal(12, 2)
+  asOfDate            DateTime
+  overdueDays         Int
+  status              AssessedFineStatus @default(OUTSTANDING)
+  calculationSnapshot Json
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+
+  school      School              @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  invoice     FeeInvoice          @relation(fields: [schoolId, invoiceId], references: [schoolId, id], onDelete: Restrict)
+  fineRule    FineRule?           @relation(fields: [schoolId, fineRuleId], references: [schoolId, id], onDelete: Restrict)
+  allocations PaymentAllocation[]
+  waivers     FineWaiver[]
+
+  @@unique([schoolId, id])
+  @@index([schoolId])
+  @@index([invoiceId])
+  @@index([status])
+  @@index([fineRuleId])
+  @@map("assessed_fines")
+}
+
+// -------------------------------------------------------------
+// Fine Waiver: Authorized Forgiveness Record
+// -------------------------------------------------------------
+model FineWaiver {
+  id                 String        @id @default(uuid())
+  schoolId           String
+  invoiceId          String
+  assessedFineId     String?
+  waivedAmount       Decimal       @db.Decimal(12, 2)
+  reason             String
+  authorizedByUserId String?
+  createdAt          DateTime      @default(now())
+
+  school           School        @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  invoice          FeeInvoice    @relation(fields: [schoolId, invoiceId], references: [schoolId, id], onDelete: Restrict)
+  assessedFine     AssessedFine? @relation(fields: [schoolId, assessedFineId], references: [schoolId, id], onDelete: Restrict)
+  authorizedByUser User?         @relation("FineWaiverAuthorizedBy", fields: [authorizedByUserId], references: [id], onDelete: SetNull)
+
+  @@unique([schoolId, id])
+  @@index([schoolId])
+  @@index([invoiceId])
+  @@index([assessedFineId])
+  @@map("fine_waivers")
+}
+
+// -------------------------------------------------------------
+// Receipt: Sequential Audit-Proof Document
+// -------------------------------------------------------------
+model Receipt {
+  id              String        @id @default(uuid())
+  schoolId        String
+  paymentId       String        @unique
+  receiptNumber   String        // e.g. "RCT-202627-00104"
+  receiptSequence Int           // Monotonic counter per school and academic year
+  academicYearId  String
+  issuedDate      DateTime      @default(now())
+  totalAmount     Decimal       @db.Decimal(12, 2)
+  status          ReceiptStatus @default(ACTIVE)
+  receiptSnapshot Json          // Frozen JSON snapshot of student, line items, cashier, etc.
+  createdAt       DateTime      @default(now())
+
+  school       School       @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  payment      Payment      @relation(fields: [schoolId, paymentId], references: [schoolId, id], onDelete: Restrict)
+  academicYear AcademicYear @relation(fields: [schoolId, academicYearId], references: [schoolId, id], onDelete: Restrict)
+
+  @@unique([schoolId, paymentId])
+  @@unique([schoolId, receiptNumber])
+  @@unique([schoolId, academicYearId, receiptSequence])
+  @@unique([schoolId, id])
+  @@index([schoolId])
+  @@index([academicYearId])
+  @@index([issuedDate])
+  @@map("receipts")
+}
+
+// -------------------------------------------------------------
+// Payment Refund: Reversal & Refund Audit Entry
+// -------------------------------------------------------------
+model PaymentRefund {
+  id                 String       @id @default(uuid())
+  schoolId           String
+  paymentId          String
+  refundAmount       Decimal      @db.Decimal(12, 2)
+  refundDate         DateTime     @default(now())
+  reason             String
+  authorizedByUserId String?
+  processedByUserId  String?
+  processedAt        DateTime?
+  failureReason      String?
+  mode               String       @default("CASH")
+  status             RefundStatus @default(SUCCEEDED)
+  referenceNumber    String?      // e.g. bank transfer UTR or refund voucher number
+  idempotencyKey     String?
+  requestHash        String?
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+
+  school           School                    @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  payment          Payment                   @relation(fields: [schoolId, paymentId], references: [schoolId, id], onDelete: Restrict)
+  authorizedByUser User?                     @relation("PaymentRefundAuthorizedBy", fields: [authorizedByUserId], references: [id], onDelete: SetNull)
+  processedByUser  User?                     @relation("PaymentRefundProcessedBy", fields: [processedByUserId], references: [id], onDelete: SetNull)
+  allocations      PaymentRefundAllocation[]
+
+  @@unique([schoolId, id])
+  @@unique([schoolId, idempotencyKey])
+  @@index([schoolId])
+  @@index([paymentId])
+  @@index([status])
+  @@map("payment_refunds")
+}
+
+// -------------------------------------------------------------
+// Payment Refund Allocation: Line-Item Mapping to Original Allocations
+// -------------------------------------------------------------
+model PaymentRefundAllocation {
+  id                   String   @id @default(uuid())
+  schoolId             String
+  paymentRefundId      String
+  originalAllocationId String
+  amount               Decimal  @db.Decimal(12, 2)
+  createdAt            DateTime @default(now())
+
+  school             School            @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  paymentRefund      PaymentRefund     @relation(fields: [schoolId, paymentRefundId], references: [schoolId, id], onDelete: Cascade)
+  originalAllocation PaymentAllocation @relation(fields: [schoolId, originalAllocationId], references: [schoolId, id], onDelete: Restrict)
+
+  @@unique([schoolId, id])
+  @@index([schoolId])
+  @@index([paymentRefundId])
+  @@index([originalAllocationId])
+  @@map("payment_refund_allocations")
+}
+
+// -------------------------------------------------------------
+// Payment Reversal: Master Audit Record for Compensating Ledger Entries
+// -------------------------------------------------------------
+model PaymentReversal {
+  id                 String       @id @default(uuid())
+  schoolId           String
+  paymentId          String
+  reversalNumber     String       // e.g. "REV-202627-00001"
+  reversalType       ReversalType @default(VOID)
+  totalAmount        Decimal      @db.Decimal(12, 2)
+  reason             String
+  authorizedByUserId String?
+  idempotencyKey     String?
+  requestHash        String?
+  createdAt          DateTime     @default(now())
+
+  school           School              @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  payment          Payment             @relation(fields: [schoolId, paymentId], references: [schoolId, id], onDelete: Restrict)
+  authorizedByUser User?               @relation("PaymentReversalAuthorizedBy", fields: [authorizedByUserId], references: [id], onDelete: SetNull)
+  allocations      PaymentAllocation[]
+
+  @@unique([schoolId, id])
+  @@unique([schoolId, reversalNumber])
+  @@unique([schoolId, idempotencyKey])
+  @@index([schoolId])
+  @@index([paymentId])
+  @@index([reversalType])
+  @@map("payment_reversals")
+}
