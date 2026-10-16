@@ -10,6 +10,7 @@ import { FeeHeadsModule } from './fee-heads/fee-heads.module';
 import { FeeStructuresModule } from './fee-structures/fee-structures.module';
 import { StudentAllocationsModule } from './student-allocations/student-allocations.module';
 import { FeeGenerationModule } from './fee-generation/fee-generation.module';
+import { ExcelImportsModule } from './excel-imports/excel-imports.module';
 
 @Module({
   imports: [
@@ -26,6 +27,7 @@ import { FeeGenerationModule } from './fee-generation/fee-generation.module';
     FeeStructuresModule,
     StudentAllocationsModule,
     FeeGenerationModule,
+    ExcelImportsModule,
   ],
 })
 export class AppModule implements NestModule {

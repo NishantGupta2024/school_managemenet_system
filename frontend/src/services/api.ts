@@ -472,9 +472,80 @@ export const feeStatementApi = {
   },
 };
 
+// Phase 2D-A: Excel Import Types & APIs
+export type ImportType = 'STUDENT_MASTER' | 'FEE_ALLOCATION';
+
+export interface ImportPreviewRowError {
+  rowNumber: number;
+  data: any;
+  errors: string[];
+}
+
+export interface ImportPreviewDuplicateRow {
+  rowNumber: number;
+  admissionNumber: string;
+  reason: string;
+  data: any;
+}
+
+export interface ImportPreviewResult {
+  importType: ImportType;
+  academicYearId: string;
+  totalRows: number;
+  validCount: number;
+  invalidCount: number;
+  duplicateCount: number;
+  validRows: any[];
+  invalidRows: ImportPreviewRowError[];
+  duplicateRows: ImportPreviewDuplicateRow[];
+  summaryMessage: string;
+}
+
+export interface ImportConfirmResult {
+  importType: ImportType;
+  academicYearId: string;
+  totalSubmitted: number;
+  insertedCount: number;
+  skippedCount: number;
+  failedCount: number;
+  errors: { rowNumber: number; message: string }[];
+}
+
+export const excelImportsApi = {
+  downloadTemplate: async (type: ImportType): Promise<Blob> => {
+    const res = await api.get(`/excel-imports/template`, {
+      params: { type },
+      responseType: 'blob',
+    });
+    return res.data;
+  },
+  preview: async (file: File, type: ImportType, academicYearId: string): Promise<ImportPreviewResult> => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('type', type);
+    formData.append('academicYearId', academicYearId);
+
+    const res = await api.post<ImportPreviewResult>('/excel-imports/preview', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+    return res.data;
+  },
+  confirm: async (data: {
+    importType: ImportType;
+    academicYearId: string;
+    rows: any[];
+  }): Promise<ImportConfirmResult> => {
+    const res = await api.post<ImportConfirmResult>('/excel-imports/confirm', data);
+    return res.data;
+  },
+};
+
 export const fetchSystemHealth = async (): Promise<HealthResponse> => {
   const response = await api.get<HealthResponse>('/health');
   return response.data;
 };
 
 export default api;
+

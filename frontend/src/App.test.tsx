@@ -158,6 +158,11 @@ vi.mock('./services/api', () => ({
       invoices: [],
     }),
   },
+  excelImportsApi: {
+    downloadTemplate: vi.fn(),
+    preview: vi.fn(),
+    confirm: vi.fn(),
+  },
 }));
 
 describe('App Component', () => {
@@ -247,6 +252,18 @@ describe('App Component', () => {
     await waitFor(() => {
       expect(screen.getByText(/Student Fee Statements/i)).toBeInTheDocument();
       expect(screen.getByText(/Monthly Fee Obligation Schedule/i)).toBeInTheDocument();
+    });
+  });
+
+  it('navigates to Excel Imports tab when clicked', async () => {
+    render(<App />);
+    const tabBtns = screen.getAllByRole('button', { name: /Excel Imports/i });
+    fireEvent.click(tabBtns[0]);
+
+    await waitFor(() => {
+      expect(screen.getByText(/Excel Data Import Engine/i)).toBeInTheDocument();
+      expect(screen.getByText(/Student Master Records/i)).toBeInTheDocument();
+      expect(screen.getByText(/Fee Structure Allocations/i)).toBeInTheDocument();
     });
   });
 });

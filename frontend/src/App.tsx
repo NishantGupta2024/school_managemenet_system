@@ -6,6 +6,7 @@ import { FeeStructuresView } from './components/FeeStructuresView';
 import { StudentAllocationsView } from './components/StudentAllocationsView';
 import { FeeGenerationView } from './components/FeeGenerationView';
 import { StudentStatementView } from './components/StudentStatementView';
+import { ExcelImportView } from './components/ExcelImportView';
 import {
   CheckCircle,
   Shield,
@@ -17,6 +18,7 @@ import {
   UserCheck,
   Sparkles,
   FileText,
+  FileSpreadsheet,
 } from 'lucide-react';
 
 export type ActiveTab =
@@ -25,7 +27,8 @@ export type ActiveTab =
   | 'fee-structures'
   | 'student-allocations'
   | 'fee-generation'
-  | 'student-statements';
+  | 'student-statements'
+  | 'excel-imports';
 
 export const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<ActiveTab>('overview');
@@ -109,6 +112,18 @@ export const App: React.FC = () => {
               <FileText className="w-4 h-4 text-emerald-500" />
               Fee Statements
             </button>
+
+            <button
+              onClick={() => setActiveTab('excel-imports')}
+              className={`flex items-center gap-2 py-3 px-3.5 border-b-2 font-medium text-sm whitespace-nowrap transition-colors ${
+                activeTab === 'excel-imports'
+                  ? 'border-indigo-600 text-indigo-600 font-semibold'
+                  : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
+              }`}
+            >
+              <FileSpreadsheet className="w-4 h-4 text-indigo-500" />
+              Excel Imports
+            </button>
           </nav>
         </div>
       </div>
@@ -166,6 +181,13 @@ export const App: React.FC = () => {
                   >
                     <FileText className="w-3.5 h-3.5 text-white" />
                     Fee Statements
+                  </button>
+                  <button
+                    onClick={() => setActiveTab('excel-imports')}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white transition-colors"
+                  >
+                    <FileSpreadsheet className="w-3.5 h-3.5 text-white" />
+                    Excel Import
                   </button>
                 </div>
               </div>
@@ -250,10 +272,13 @@ export const App: React.FC = () => {
 
         {/* Tab 6: Student Fee Statements */}
         {activeTab === 'student-statements' && <StudentStatementView />}
+
+        {/* Tab 7: Excel Data Imports */}
+        {activeTab === 'excel-imports' && <ExcelImportView />}
       </main>
 
       <footer className="bg-white border-t border-slate-200 py-4 px-6 text-center text-xs text-slate-500">
-        School Fee Management System • Phase 2C Monthly Fee Generation Engine • Multi-Tenant Enterprise Architecture
+        School Fee Management System • Phase 2D Excel Data Import Module • Multi-Tenant Enterprise Architecture
       </footer>
     </div>
   );
