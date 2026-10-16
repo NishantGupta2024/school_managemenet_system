@@ -2686,5 +2686,431 @@ describe('PaymentsService — Payment Collection Engine & Accounting Invariants'
       await cleanupInvoice(inv.id);
     }
   });
+
+  // -------------------------------------------------------------
+  // Test 54: Object-level authorization on payment detail - Student isolation
+  // -------------------------------------------------------------
+  it('54. should reject Student B attempting to access Student A payment record (403 Forbidden)', async () => {
+    let studentUserA = await prisma.user.findFirst({
+      where: { schoolId: schoolAId, email: 'student-a-test@greenwood.edu' },
+    });
+    if (!studentUserA) {
+      studentUserA = await prisma.user.create({
+        data: {
+          schoolId: schoolAId,
+          email: 'student-a-test@greenwood.edu',
+          passwordHash: 'dummyhash',
+          name: 'Student A',
+          role: UserRole.STUDENT,
+        },
+      });
+    }
+    await prisma.student.update({
+      where: { id: testStudentId },
+      data: { userId: studentUserA.id },
+    });
+
+    const inv = await createTestInvoice({ month: 154, grossAmount: 1000 });
+    const payRes = await service.collectPayment(schoolAId, adminUserSchoolA, {
+      studentId: testStudentId,
+      academicYearId: testAcademicYearId,
+      amount: 1000,
+      paymentMethod: PaymentMethod.CASH,
+    });
+
+    const studentUserB = {
+      id: '00000000-0000-0000-0000-000000000099',
+      schoolId: schoolAId,
+      role: UserRole.STUDENT,
+      name: 'Student B',
+    };
+
+    try {
+      await expect(
+        service.findPaymentById(schoolAId, studentUserB, payRes.payment.id),
+      ).rejects.toThrow(ForbiddenException);
+
+      const studentAPayment = await service.findPaymentById(
+        schoolAId,
+        studentUserA,
+        payRes.payment.id,
+      );
+      expect(studentAPayment.id).toBe(payRes.payment.id);
+    } finally {
+      await cleanupInvoice(inv.id);
+    }
+  });
+
+  // -------------------------------------------------------------
+  // Test 55: Object-level authorization on payment detail - Unverified parent
+  // -------------------------------------------------------------
+  it('55. should reject a parent without a verified relationship attempting to access payment (403 Forbidden)', async () => {
+    const inv = await createTestInvoice({ month: 155, grossAmount: 1000 });
+    const payRes = await service.collectPayment(schoolAId, adminUserSchoolA, {
+      studentId: testStudentId,
+      academicYearId: testAcademicYearId,
+      amount: 1000,
+      paymentMethod: PaymentMethod.CASH,
+    });
+
+    const unlinkedParent = {
+      id: '00000000-0000-0000-0000-000000000089',
+      schoolId: schoolAId,
+      role: UserRole.PARENT,
+      name: 'Unlinked Parent',
+    };
+
+    try {
+      await expect(
+        service.findPaymentById(schoolAId, unlinkedParent, payRes.payment.id),
+      ).rejects.toThrow(ForbiddenException);
+    } finally {
+      await cleanupInvoice(inv.id);
+    }
+  });
+
+  // -------------------------------------------------------------
+  // Test 56: Object-level authorization on payment detail - Verified parent
+  // -------------------------------------------------------------
+  it('56. should allow a parent with a verified relationship to access authorized payment', async () => {
+    let parentUserVerified = await prisma.user.findFirst({
+      where: { schoolId: schoolAId, email: 'parent-v-test@greenwood.edu' },
+    });
+    if (!parentUserVerified) {
+      parentUserVerified = await prisma.user.create({
+        data: {
+          schoolId: schoolAId,
+          email: 'parent-v-test@greenwood.edu',
+          passwordHash: 'dummyhash',
+          name: 'Verified Parent',
+          role: UserRole.PARENT,
+        },
+      });
+    }
+
+    await prisma.parentStudentRelation.deleteMany({
+      where: { schoolId: schoolAId, parentId: parentUserVerified.id, studentId: testStudentId },
+    });
+    await prisma.parentStudentRelation.create({
+      data: {
+        schoolId: schoolAId,
+        parentId: parentUserVerified.id,
+        studentId: testStudentId,
+        relationshipType: 'FATHER',
+        isVerified: true,
+      },
+    });
+
+    const inv = await createTestInvoice({ month: 156, grossAmount: 1000 });
+    const payRes = await service.collectPayment(schoolAId, adminUserSchoolA, {
+      studentId: testStudentId,
+      academicYearId: testAcademicYearId,
+      amount: 1000,
+      paymentMethod: PaymentMethod.CASH,
+    });
+
+    try {
+      const retrieved = await service.findPaymentById(
+        schoolAId,
+        parentUserVerified,
+        payRes.payment.id,
+      );
+      expect(retrieved.id).toBe(payRes.payment.id);
+      expect(retrieved.studentId).toBe(testStudentId);
+    } finally {
+      await cleanupInvoice(inv.id);
+    }
+  });
+
+  // -------------------------------------------------------------
+  // Test 57: Cross-tenant payment access rejection
+  // -------------------------------------------------------------
+  it('57. should return 404 NotFoundException when attempting to access a payment from another school', async () => {
+    const inv = await createTestInvoice({ month: 157, grossAmount: 1000 });
+    const payRes = await service.collectPayment(schoolAId, adminUserSchoolA, {
+      studentId: testStudentId,
+      academicYearId: testAcademicYearId,
+      amount: 1000,
+      paymentMethod: PaymentMethod.CASH,
+    });
+
+    const adminUserSchoolB = {
+      id: '00000000-0000-0000-0000-000000000021',
+      schoolId: schoolBId,
+      role: UserRole.SCHOOL_ADMIN,
+    };
+
+    try {
+      await expect(
+        service.findPaymentById(schoolBId, adminUserSchoolB, payRes.payment.id),
+      ).rejects.toThrow(NotFoundException);
+    } finally {
+      await cleanupInvoice(inv.id);
+    }
+  });
+
+  // -------------------------------------------------------------
+  // Test 58: Object-level authorization on receipt - Student isolation
+  // -------------------------------------------------------------
+  it('58. should reject Student B attempting to access Student A receipt (403 Forbidden)', async () => {
+    const inv = await createTestInvoice({ month: 158, grossAmount: 1000 });
+    const payRes = await service.collectPayment(schoolAId, adminUserSchoolA, {
+      studentId: testStudentId,
+      academicYearId: testAcademicYearId,
+      amount: 1000,
+      paymentMethod: PaymentMethod.CASH,
+    });
+
+    const studentUserB = {
+      id: '00000000-0000-0000-0000-000000000099',
+      schoolId: schoolAId,
+      role: UserRole.STUDENT,
+      name: 'Student B',
+    };
+
+    try {
+      await expect(
+        service.findReceiptByNumber(schoolAId, studentUserB, payRes.receipt.receiptNumber),
+      ).rejects.toThrow(ForbiddenException);
+    } finally {
+      await cleanupInvoice(inv.id);
+    }
+  });
+
+  // -------------------------------------------------------------
+  // Test 59: Object-level authorization on receipt - Unverified parent
+  // -------------------------------------------------------------
+  it('59. should reject an unverified parent attempting to access Student A receipt (403 Forbidden)', async () => {
+    const inv = await createTestInvoice({ month: 159, grossAmount: 1000 });
+    const payRes = await service.collectPayment(schoolAId, adminUserSchoolA, {
+      studentId: testStudentId,
+      academicYearId: testAcademicYearId,
+      amount: 1000,
+      paymentMethod: PaymentMethod.CASH,
+    });
+
+    const unlinkedParent = {
+      id: '00000000-0000-0000-0000-000000000089',
+      schoolId: schoolAId,
+      role: UserRole.PARENT,
+      name: 'Unlinked Parent',
+    };
+
+    try {
+      await expect(
+        service.findReceiptByNumber(schoolAId, unlinkedParent, payRes.receipt.receiptNumber),
+      ).rejects.toThrow(ForbiddenException);
+    } finally {
+      await cleanupInvoice(inv.id);
+    }
+  });
+
+  // -------------------------------------------------------------
+  // Test 60: Object-level authorization on receipt - Verified parent
+  // -------------------------------------------------------------
+  it('60. should allow a verified parent to access Student A receipt', async () => {
+    let parentUserVerified = await prisma.user.findFirst({
+      where: { schoolId: schoolAId, email: 'parent-v-test@greenwood.edu' },
+    });
+    if (!parentUserVerified) {
+      parentUserVerified = await prisma.user.create({
+        data: {
+          schoolId: schoolAId,
+          email: 'parent-v-test@greenwood.edu',
+          passwordHash: 'dummyhash',
+          name: 'Verified Parent',
+          role: UserRole.PARENT,
+        },
+      });
+    }
+
+    await prisma.parentStudentRelation.deleteMany({
+      where: { schoolId: schoolAId, parentId: parentUserVerified.id, studentId: testStudentId },
+    });
+    await prisma.parentStudentRelation.create({
+      data: {
+        schoolId: schoolAId,
+        parentId: parentUserVerified.id,
+        studentId: testStudentId,
+        relationshipType: 'FATHER',
+        isVerified: true,
+      },
+    });
+
+    const inv = await createTestInvoice({ month: 160, grossAmount: 1000 });
+    const payRes = await service.collectPayment(schoolAId, adminUserSchoolA, {
+      studentId: testStudentId,
+      academicYearId: testAcademicYearId,
+      amount: 1000,
+      paymentMethod: PaymentMethod.CASH,
+    });
+
+    try {
+      const retrieved = await service.findReceiptByNumber(
+        schoolAId,
+        parentUserVerified,
+        payRes.receipt.receiptNumber,
+      );
+      expect(retrieved.receiptNumber).toBe(payRes.receipt.receiptNumber);
+      expect(retrieved.payment.studentId).toBe(testStudentId);
+    } finally {
+      await cleanupInvoice(inv.id);
+    }
+  });
+
+  // -------------------------------------------------------------
+  // Test 61: Cross-tenant receipt access rejection
+  // -------------------------------------------------------------
+  it('61. should return 404 NotFoundException when attempting to access a receipt from another school', async () => {
+    const inv = await createTestInvoice({ month: 161, grossAmount: 1000 });
+    const payRes = await service.collectPayment(schoolAId, adminUserSchoolA, {
+      studentId: testStudentId,
+      academicYearId: testAcademicYearId,
+      amount: 1000,
+      paymentMethod: PaymentMethod.CASH,
+    });
+
+    const adminUserSchoolB = {
+      id: '00000000-0000-0000-0000-000000000021',
+      schoolId: schoolBId,
+      role: UserRole.SCHOOL_ADMIN,
+    };
+
+    try {
+      await expect(
+        service.findReceiptByNumber(schoolBId, adminUserSchoolB, payRes.receipt.receiptNumber),
+      ).rejects.toThrow(NotFoundException);
+    } finally {
+      await cleanupInvoice(inv.id);
+    }
+  });
+
+  // -------------------------------------------------------------
+  // Test 62: Payment allocation authorization - Reject invoice belonging to another student
+  // -------------------------------------------------------------
+  it('62. should reject payment collection if explicit allocations specify an invoice belonging to another student in the same school', async () => {
+    const invA = await createTestInvoice({ month: 162, grossAmount: 1000 });
+
+    const studentB = await prisma.student.create({
+      data: {
+        schoolId: schoolAId,
+        admissionNumber: `PAY-TEST-B-${Date.now()}`,
+        firstName: 'StudentB',
+        lastName: 'Other',
+        gradeId: testGradeId,
+        sectionId: (await prisma.section.findFirst({ where: { schoolId: schoolAId } }))!.id,
+        academicYearId: testAcademicYearId,
+        status: 'ACTIVE',
+      },
+    });
+
+    const invB = await prisma.feeInvoice.create({
+      data: {
+        schoolId: schoolAId,
+        studentId: studentB.id,
+        academicYearId: testAcademicYearId,
+        billingMonth: 162,
+        dueDate: new Date('2026-04-10T18:29:59.999Z'),
+        status: InvoiceStatus.DUE,
+        grossAmount: new Prisma.Decimal(1000),
+        discountAmount: new Prisma.Decimal(0),
+        netAmount: new Prisma.Decimal(1000),
+      },
+    });
+    await prisma.invoiceItem.create({
+      data: {
+        schoolId: schoolAId,
+        invoiceId: invB.id,
+        feeHeadId: testFeeHeadId,
+        feeHeadNameSnapshot: 'Tuition Fee',
+        grossAmount: new Prisma.Decimal(1000),
+        discountAmount: new Prisma.Decimal(0),
+        netAmount: new Prisma.Decimal(1000),
+        billingFrequencySnapshot: 'MONTHLY',
+      },
+    });
+
+    try {
+      await expect(
+        service.collectPayment(schoolAId, adminUserSchoolA, {
+          studentId: testStudentId,
+          academicYearId: testAcademicYearId,
+          amount: 1000,
+          paymentMethod: PaymentMethod.CASH,
+          allocations: [
+            {
+              invoiceId: invB.id,
+              amount: 1000,
+              allocationType: AllocationType.PRINCIPAL,
+            },
+          ],
+        }),
+      ).rejects.toThrow(BadRequestException);
+    } finally {
+      await cleanupInvoice(invA.id);
+      await cleanupInvoice(invB.id);
+      await prisma.student.delete({ where: { id: studentB.id } }).catch(() => {});
+    }
+  });
+
+  // -------------------------------------------------------------
+  // Test 63: Payment allocation authorization - Reject invoice belonging to another school
+  // -------------------------------------------------------------
+  it('63. should reject payment collection if explicit allocations specify an invoice belonging to another school', async () => {
+    const invA = await createTestInvoice({ month: 163, grossAmount: 1000 });
+
+    const sessionB = await prisma.academicYear.findFirst({ where: { schoolId: schoolBId } });
+    const gradeB = await prisma.gradeClass.findFirst({ where: { schoolId: schoolBId } });
+    const sectionB = await prisma.section.findFirst({ where: { schoolId: schoolBId } });
+
+    const studentSchoolB = await prisma.student.create({
+      data: {
+        schoolId: schoolBId,
+        admissionNumber: `PAY-TEST-SCHB-${Date.now()}`,
+        firstName: 'SchoolB',
+        lastName: 'Student',
+        gradeId: gradeB!.id,
+        sectionId: sectionB!.id,
+        academicYearId: sessionB!.id,
+        status: 'ACTIVE',
+      },
+    });
+
+    const invSchoolB = await prisma.feeInvoice.create({
+      data: {
+        schoolId: schoolBId,
+        studentId: studentSchoolB.id,
+        academicYearId: sessionB!.id,
+        billingMonth: 163,
+        dueDate: new Date('2026-04-10T18:29:59.999Z'),
+        status: InvoiceStatus.DUE,
+        grossAmount: new Prisma.Decimal(1000),
+        discountAmount: new Prisma.Decimal(0),
+        netAmount: new Prisma.Decimal(1000),
+      },
+    });
+
+    try {
+      await expect(
+        service.collectPayment(schoolAId, adminUserSchoolA, {
+          studentId: testStudentId,
+          academicYearId: testAcademicYearId,
+          amount: 1000,
+          paymentMethod: PaymentMethod.CASH,
+          allocations: [
+            {
+              invoiceId: invSchoolB.id,
+              amount: 1000,
+              allocationType: AllocationType.PRINCIPAL,
+            },
+          ],
+        }),
+      ).rejects.toThrow(BadRequestException);
+    } finally {
+      await cleanupInvoice(invA.id);
+      await cleanupInvoice(invSchoolB.id);
+      await prisma.student.delete({ where: { id: studentSchoolB.id } }).catch(() => {});
+    }
+  });
 });
 
