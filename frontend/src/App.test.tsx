@@ -163,6 +163,28 @@ vi.mock('./services/api', () => ({
     preview: vi.fn(),
     confirm: vi.fn(),
   },
+  fineRulesApi: {
+    list: vi.fn().mockResolvedValue([
+      {
+        id: 'rule-1',
+        schoolId: '00000000-0000-0000-0000-000000000001',
+        academicYearId: 'y26',
+        name: 'Standard Late Fee',
+        fineType: 'PER_DAY',
+        fineValue: 25,
+        gracePeriodDays: 5,
+        maxFineCap: 300,
+        dayCountPolicy: 'CALENDAR_DAYS',
+        status: 'ACTIVE',
+      },
+    ]),
+    listInvoices: vi.fn().mockResolvedValue([]),
+    create: vi.fn(),
+    update: vi.fn(),
+    updateStatus: vi.fn(),
+    delete: vi.fn(),
+    preview: vi.fn(),
+  },
 }));
 
 describe('App Component', () => {
@@ -266,4 +288,17 @@ describe('App Component', () => {
       expect(screen.getByText(/Fee Structure Allocations/i)).toBeInTheDocument();
     });
   });
+
+  it('navigates to Fine Rules tab when clicked', async () => {
+    render(<App />);
+    const tabBtns = screen.getAllByRole('button', { name: /Fine Rules/i });
+    fireEvent.click(tabBtns[0]);
+
+    await waitFor(() => {
+      expect(screen.getByText(/Fine Configuration & Late Fee Rules/i)).toBeInTheDocument();
+      expect(screen.getByText(/Standard Late Fee/i)).toBeInTheDocument();
+      expect(screen.getByText(/Late Fine Calculation Preview & Simulator/i)).toBeInTheDocument();
+    });
+  });
 });
+

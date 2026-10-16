@@ -325,6 +325,12 @@ export const StudentStatementView: React.FC = () => {
                     </span>
                   )}
                 </div>
+                {typeof statement.summary.totalCalculatedFinePreview === 'number' &&
+                  statement.summary.totalCalculatedFinePreview > 0 && (
+                    <div className="mt-2 text-[11px] font-semibold text-amber-800">
+                      Est. Late Fine Preview: {formatCurrency(statement.summary.totalCalculatedFinePreview)}
+                    </div>
+                  )}
               </div>
             </div>
           </div>
@@ -389,7 +395,12 @@ export const StudentStatementView: React.FC = () => {
                           {inv.discountAmount > 0 ? `-${formatCurrency(inv.discountAmount)}` : '₹0.00'}
                         </td>
                         <td className="py-3 px-4 font-mono font-bold text-slate-900">
-                          {formatCurrency(inv.netAmount)}
+                          <div>{formatCurrency(inv.netAmount)}</div>
+                          {inv.finePreview && inv.finePreview.calculatedFine > 0 && (
+                            <div className="text-[10px] font-semibold text-amber-700 mt-0.5">
+                              +{formatCurrency(inv.finePreview.calculatedFine)} Fine Preview
+                            </div>
+                          )}
                         </td>
                         <td className="py-3 px-4">
                           {getStatusBadge(inv.status)}

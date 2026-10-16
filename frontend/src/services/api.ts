@@ -325,6 +325,17 @@ export interface FeeInvoiceItem {
   createdAt: string;
 }
 
+export interface StatementFinePreview {
+  calculatedFine: number;
+  overdueDays: number;
+  gracePeriodDays: number;
+  fineRuleName: string | null;
+  fineType: FineType | null;
+  capApplied: boolean;
+  isPaymentOrCollected: false;
+  reason: string;
+}
+
 export interface FeeInvoice {
   id: string;
   schoolId: string;
@@ -340,6 +351,7 @@ export interface FeeInvoice {
   storedStatus: InvoiceStatus;
   generatedAt: string;
   items: FeeInvoiceItem[];
+  finePreview?: StatementFinePreview | null;
 }
 
 export interface FeeGenerationPreview {
@@ -428,6 +440,7 @@ export interface StudentFeeStatement {
     totalGrossAmount: number;
     totalDiscountAmount: number;
     totalNetAmount: number;
+    totalCalculatedFinePreview?: number;
     invoiceCount: number;
     statusBreakdown: {
       UPCOMING: number;
@@ -542,10 +555,194 @@ export const excelImportsApi = {
   },
 };
 
+// Phase 2D-B: Fine Configuration & Late Fine Rules Engine Types & APIs
+export type FineType = 'FIXED' | 'PER_DAY' | 'PERCENTAGE';
+export type FineDayCountPolicy = 'CALENDAR_DAYS' | 'WORKING_DAYS';
+export type FineRuleStatus = 'ACTIVE' | 'INACTIVE';
+
+export interface FineRule {
+  id: string;
+  schoolId: string;
+  academicYearId: string;
+  academicYearName?: string | null;
+  name: string;
+  description?: string | null;
+  fineType: FineType;
+  fineValue: number;
+  gracePeriodDays: number;
+  maxFineCap?: number | null;
+  dayCountPolicy: FineDayCountPolicy;
+  applicableFeeHeadId?: string | null;
+  applicableFeeHeadName?: string | null;
+  applicableFeeHeadCode?: string | null;
+  applicableCategory?: string | null;
+  status: FineRuleStatus;
+  effectiveStartDate?: string | null;
+  effectiveEndDate?: string | null;
+  createdByUserId?: string | null;
+  updatedByUserId?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface FinePreviewInvoiceItem {
+  id: string;
+  studentId: string;
+  studentName: string;
+  admissionNumber: string;
+  gradeName?: string | null;
+  sectionName?: string | null;
+  academicYearId: string;
+  academicYearName?: string | null;
+  billingMonth: number;
+  monthName: string;
+  dueDate: string;
+  grossAmount: number;
+  discountAmount: number;
+  netAmount: number;
+  status: InvoiceStatus;
+}
+
+export interface FinePreviewResponse {
+  invoiceId: string;
+  dueDate: string;
+  dueLocalDate: string;
+  gracePeriodDays: number;
+  graceEndLocalDate: string;
+  asOfDate: string;
+  asOfLocalDate: string;
+  timeZone: string;
+  dayCountPolicy: FineDayCountPolicy;
+  isPastGracePeriod: boolean;
+  calendarOverdueDays: number;
+  overdueDays: number;
+  invoiceGrossAmount: number;
+  invoiceDiscountAmount: number;
+  invoiceNetAmount: number;
+  authoritativePaidAmount: number;
+  paidAmountUsed: number;
+  isPaymentSimulated: boolean;
+  isFullyPaid: boolean;
+  scopedBaseAmount: number;
+  eligibleOutstandingBasis: number;
+  ruleApplied: {
+    id: string;
+    name: string;
+    fineType: FineType;
+    fineValue: number;
+    gracePeriodDays: number;
+    maxFineCap: number | null;
+    dayCountPolicy: FineDayCountPolicy;
+    applicableFeeHeadId: string | null;
+    applicableCategory: string | null;
+    status: FineRuleStatus;
+  } | null;
+  fineType: FineType | null;
+  fineValue: number;
+  uncappedFine: number;
+  maxFineCap: number | null;
+  capApplied: boolean;
+  alreadyRecordedFineAmount: number;
+  calculatedFine: number;
+  isPaymentOrCollected: false;
+  reason: string;
+  invoiceSummary: {
+    id: string;
+    studentId: string;
+    studentName: string;
+    admissionNumber: string;
+    gradeName?: string | null;
+    academicYearId: string;
+    academicYearName?: string | null;
+    billingMonth: number;
+    monthName: string;
+    dueDate: string;
+    grossAmount: number;
+    discountAmount: number;
+    netAmount: number;
+    status: string;
+  };
+}
+
+export const fineRulesApi = {
+  list: async (params?: { academicYearId?: string; status?: FineRuleStatus }) => {
+    const res = await api.get<FineRule[]>('/fine-rules', { params });
+    return res.data;
+  },
+  get: async (id: string) => {
+    const res = await api.get<FineRule>(`/fine-rules/${id}`);
+    return res.data;
+  },
+  create: async (data: {
+    academicYearId: string;
+    name: string;
+    description?: string;
+    fineType: FineType;
+    fineValue: number;
+    gracePeriodDays?: number;
+    maxFineCap?: number | null;
+    dayCountPolicy?: FineDayCountPolicy;
+    applicableFeeHeadId?: string | null;
+    applicableCategory?: string | null;
+    status?: FineRuleStatus;
+    effectiveStartDate?: string | null;
+    effectiveEndDate?: string | null;
+  }) => {
+    const res = await api.post<FineRule>('/fine-rules', data);
+    return res.data;
+  },
+  update: async (
+    id: string,
+    data: Partial<{
+      academicYearId: string;
+      name: string;
+      description?: string;
+      fineType: FineType;
+      fineValue: number;
+      gracePeriodDays: number;
+      maxFineCap?: number | null;
+      dayCountPolicy: FineDayCountPolicy;
+      applicableFeeHeadId?: string | null;
+      applicableCategory?: string | null;
+      status: FineRuleStatus;
+      effectiveStartDate?: string | null;
+      effectiveEndDate?: string | null;
+    }>,
+  ) => {
+    const res = await api.patch<FineRule>(`/fine-rules/${id}`, data);
+    return res.data;
+  },
+  updateStatus: async (id: string, status: FineRuleStatus) => {
+    const res = await api.patch<FineRule>(`/fine-rules/${id}/status`, { status });
+    return res.data;
+  },
+  delete: async (id: string) => {
+    const res = await api.delete<{ deleted: boolean; id: string }>(`/fine-rules/${id}`);
+    return res.data;
+  },
+  listInvoices: async (academicYearId?: string) => {
+    const res = await api.get<FinePreviewInvoiceItem[]>('/fine-rules/invoices', {
+      params: academicYearId ? { academicYearId } : undefined,
+    });
+    return res.data;
+  },
+  preview: async (data: {
+    invoiceId: string;
+    fineRuleId?: string;
+    asOfDate?: string;
+    paidAmount?: number;
+  }) => {
+    const res = await api.post<FinePreviewResponse>('/fine-rules/preview', data);
+    return res.data;
+  },
+};
+
 export const fetchSystemHealth = async (): Promise<HealthResponse> => {
   const response = await api.get<HealthResponse>('/health');
   return response.data;
 };
 
 export default api;
+
+
 

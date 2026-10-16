@@ -76,6 +76,22 @@ enum InvoiceStatus {
   VOID
 }
 
+enum FineType {
+  FIXED
+  PER_DAY
+  PERCENTAGE
+}
+
+enum FineDayCountPolicy {
+  CALENDAR_DAYS
+  WORKING_DAYS
+}
+
+enum FineRuleStatus {
+  ACTIVE
+  INACTIVE
+}
+
 // -------------------------------------------------------------
 // Core Multi-Tenant Foundation: School / Tenant
 // -------------------------------------------------------------
@@ -107,6 +123,7 @@ model School {
   feeGenerationRuns         FeeGenerationRun[]
   parentStudentRelations    ParentStudentRelation[]
   studentOneTimeFeeBillings StudentOneTimeFeeBilling[]
+  fineRules                 FineRule[]
 
   @@map("schools")
 }
@@ -130,6 +147,8 @@ model User {
   feeGenerationRuns     FeeGenerationRun[]
   studentProfile        Student?                @relation("StudentUserAccount")
   parentRelations       ParentStudentRelation[]
+  createdFineRules      FineRule[]              @relation("FineRuleCreatedBy")
+  updatedFineRules      FineRule[]              @relation("FineRuleUpdatedBy")
 
   @@unique([schoolId, email])
   @@index([schoolId])
@@ -156,6 +175,7 @@ model AcademicYear {
   invoices              FeeInvoice[]
   feeGenerationRuns     FeeGenerationRun[]
   oneTimeBillings       StudentOneTimeFeeBilling[]
+  fineRules             FineRule[]
 
   @@unique([schoolId, name])
   @@unique([schoolId, id]) // Required for composite foreign key constraint
@@ -275,6 +295,7 @@ model FeeHead {
   structureItems  FeeStructureItem[]
   invoiceItems    InvoiceItem[]
   oneTimeBillings StudentOneTimeFeeBilling[]
+  fineRules       FineRule[]
 
   @@unique([schoolId, code])
   @@unique([schoolId, id])
@@ -521,3 +542,44 @@ model StudentOneTimeFeeBilling {
   @@index([feeHeadId])
   @@map("student_one_time_fee_billings")
 }
+
+// =============================================================
+// PHASE 2D-B: FINE CONFIGURATION & LATE FINE RULES ENGINE
+// =============================================================
+
+model FineRule {
+  id                  String             @id @default(uuid())
+  schoolId            String
+  academicYearId      String
+  name                String
+  description         String?
+  fineType            FineType           @default(FIXED)
+  fineValue           Decimal            @db.Decimal(12, 2)
+  gracePeriodDays     Int                @default(5)
+  maxFineCap          Decimal?           @db.Decimal(12, 2)
+  dayCountPolicy      FineDayCountPolicy @default(CALENDAR_DAYS)
+  applicableFeeHeadId String?
+  applicableCategory  FeeHeadCategory?
+  effectiveStartDate  DateTime?
+  effectiveEndDate    DateTime?
+  status              FineRuleStatus     @default(ACTIVE)
+  createdByUserId     String?
+  updatedByUserId     String?
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+
+  school            School       @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  academicYear      AcademicYear @relation(fields: [schoolId, academicYearId], references: [schoolId, id], onDelete: Cascade)
+  applicableFeeHead FeeHead?     @relation(fields: [schoolId, applicableFeeHeadId], references: [schoolId, id], onDelete: Restrict)
+  createdBy         User?        @relation("FineRuleCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  updatedBy         User?        @relation("FineRuleUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: SetNull)
+
+  @@unique([schoolId, academicYearId, name])
+  @@unique([schoolId, id])
+  @@index([schoolId])
+  @@index([academicYearId])
+  @@index([status])
+  @@index([applicableFeeHeadId])
+  @@map("fine_rules")
+}
+

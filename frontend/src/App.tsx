@@ -7,6 +7,7 @@ import { StudentAllocationsView } from './components/StudentAllocationsView';
 import { FeeGenerationView } from './components/FeeGenerationView';
 import { StudentStatementView } from './components/StudentStatementView';
 import { ExcelImportView } from './components/ExcelImportView';
+import { FineConfigurationView } from './components/FineConfigurationView';
 import {
   CheckCircle,
   Shield,
@@ -19,6 +20,7 @@ import {
   Sparkles,
   FileText,
   FileSpreadsheet,
+  Scale,
 } from 'lucide-react';
 
 export type ActiveTab =
@@ -28,7 +30,8 @@ export type ActiveTab =
   | 'student-allocations'
   | 'fee-generation'
   | 'student-statements'
-  | 'excel-imports';
+  | 'excel-imports'
+  | 'fine-configuration';
 
 export const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<ActiveTab>('overview');
@@ -124,6 +127,18 @@ export const App: React.FC = () => {
               <FileSpreadsheet className="w-4 h-4 text-indigo-500" />
               Excel Imports
             </button>
+
+            <button
+              onClick={() => setActiveTab('fine-configuration')}
+              className={`flex items-center gap-2 py-3 px-3.5 border-b-2 font-medium text-sm whitespace-nowrap transition-colors ${
+                activeTab === 'fine-configuration'
+                  ? 'border-indigo-600 text-indigo-600 font-semibold'
+                  : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
+              }`}
+            >
+              <Scale className="w-4 h-4 text-amber-500" />
+              Fine Rules
+            </button>
           </nav>
         </div>
       </div>
@@ -188,6 +203,13 @@ export const App: React.FC = () => {
                   >
                     <FileSpreadsheet className="w-3.5 h-3.5 text-white" />
                     Excel Import
+                  </button>
+                  <button
+                    onClick={() => setActiveTab('fine-configuration')}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold bg-amber-600 hover:bg-amber-500 text-white transition-colors"
+                  >
+                    <Scale className="w-3.5 h-3.5 text-white" />
+                    Fine Configuration
                   </button>
                 </div>
               </div>
@@ -275,10 +297,13 @@ export const App: React.FC = () => {
 
         {/* Tab 7: Excel Data Imports */}
         {activeTab === 'excel-imports' && <ExcelImportView />}
+
+        {/* Tab 8: Fine Configuration */}
+        {activeTab === 'fine-configuration' && <FineConfigurationView />}
       </main>
 
       <footer className="bg-white border-t border-slate-200 py-4 px-6 text-center text-xs text-slate-500">
-        School Fee Management System • Phase 2D Excel Data Import Module • Multi-Tenant Enterprise Architecture
+        School Fee Management System • Phase 2D Fine Configuration & Late Fine Rules Engine • Multi-Tenant Enterprise Architecture
       </footer>
     </div>
   );

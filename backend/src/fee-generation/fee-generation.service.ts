@@ -3,18 +3,21 @@ import {
   NotFoundException,
   BadRequestException,
   ForbiddenException,
+  Optional,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { PreviewFeeGenerationDto } from './dto/preview-fee-generation.dto';
 import { ExecuteFeeGenerationDto } from './dto/execute-fee-generation.dto';
 import {
   FeeFrequency,
+  FineRuleStatus,
   ConcessionType,
   InvoiceStatus,
   UserRole,
   Prisma,
   AcademicYear,
 } from '@prisma/client';
+import { FineRulesService } from '../fine-rules/fine-rules.service';
 
 export interface PlannedInvoiceItem {
   feeHeadId: string;
@@ -54,7 +57,10 @@ export const BILLING_MONTH_NAMES = [
 
 @Injectable()
 export class FeeGenerationService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Optional() private readonly fineRulesService?: FineRulesService,
+  ) {}
 
   public convertLocalToUtc(
     year: number,
@@ -847,24 +853,45 @@ export class FeeGenerationService {
       },
     });
 
-    // 5. Fetch generated invoices
-    const invoices = await this.prisma.feeInvoice.findMany({
-      where: {
-        schoolId,
-        studentId,
-        academicYearId: targetAcademicYearId,
-      },
-      include: {
-        items: {
-          orderBy: { createdAt: 'asc' },
+    // 5. Fetch generated invoices, school timezone, and active fine rules for session
+    const [invoices, school, activeFineRules] = await Promise.all([
+      this.prisma.feeInvoice.findMany({
+        where: {
+          schoolId,
+          studentId,
+          academicYearId: targetAcademicYearId,
         },
-      },
-      orderBy: { billingMonth: 'asc' },
-    });
+        include: {
+          items: {
+            include: {
+              feeHead: true,
+            },
+            orderBy: { createdAt: 'asc' },
+          },
+        },
+        orderBy: { billingMonth: 'asc' },
+      }),
+      this.prisma.school.findUnique({
+        where: { id: schoolId },
+        select: { timezone: true },
+      }),
+      this.prisma.fineRule.findMany({
+        where: {
+          schoolId,
+          academicYearId: targetAcademicYearId,
+          status: FineRuleStatus.ACTIVE,
+        },
+        orderBy: { createdAt: 'asc' },
+      }),
+    ]);
+
+    const timezone = school?.timezone || 'Asia/Kolkata';
+    const now = new Date();
 
     let totalGross = new Prisma.Decimal(0);
     let totalDiscount = new Prisma.Decimal(0);
     let totalNet = new Prisma.Decimal(0);
+    let totalFinePreview = new Prisma.Decimal(0);
     const statusBreakdown = {
       UPCOMING: 0,
       DUE: 0,
@@ -873,12 +900,41 @@ export class FeeGenerationService {
     };
 
     const formattedInvoices = invoices.map((inv) => {
-      const derivedStatus = this.deriveCurrentInvoiceStatus(inv.status, inv.dueDate);
+      const matchedRule = this.fineRulesService
+        ? this.fineRulesService.selectBestMatchingRuleForInvoice(
+            inv,
+            activeFineRules,
+            now,
+            timezone,
+          )
+        : null;
+
+      const graceDays = matchedRule ? matchedRule.gracePeriodDays : 5;
+      const derivedStatus = this.deriveCurrentInvoiceStatus(
+        inv.status,
+        inv.dueDate,
+        now,
+        graceDays,
+      );
       statusBreakdown[derivedStatus] = (statusBreakdown[derivedStatus] || 0) + 1;
+
+      const fineBreakdown = this.fineRulesService
+        ? this.fineRulesService.evaluateFineCalculation({
+            invoice: inv,
+            rule: matchedRule,
+            asOfDate: now,
+            timeZone: timezone,
+          })
+        : null;
 
       totalGross = totalGross.add(inv.grossAmount);
       totalDiscount = totalDiscount.add(inv.discountAmount);
       totalNet = totalNet.add(inv.netAmount);
+      if (fineBreakdown) {
+        totalFinePreview = totalFinePreview.add(
+          new Prisma.Decimal(fineBreakdown.calculatedFine),
+        );
+      }
 
       return {
         id: inv.id,
@@ -894,6 +950,18 @@ export class FeeGenerationService {
         status: derivedStatus,
         storedStatus: inv.status,
         generatedAt: inv.generatedAt,
+        finePreview: fineBreakdown
+          ? {
+              calculatedFine: fineBreakdown.calculatedFine,
+              overdueDays: fineBreakdown.overdueDays,
+              gracePeriodDays: fineBreakdown.gracePeriodDays,
+              fineRuleName: fineBreakdown.ruleApplied?.name || null,
+              fineType: fineBreakdown.fineType,
+              capApplied: fineBreakdown.capApplied,
+              eligibleOutstandingBasis: fineBreakdown.eligibleOutstandingBasis,
+              isPaymentOrCollected: false,
+            }
+          : null,
         items: inv.items.map((item) => ({
           id: item.id,
           feeHeadId: item.feeHeadId,
@@ -943,6 +1011,7 @@ export class FeeGenerationService {
         totalGrossAmount: totalGross.toDecimalPlaces(2).toNumber(),
         totalDiscountAmount: totalDiscount.toDecimalPlaces(2).toNumber(),
         totalNetAmount: totalNet.toDecimalPlaces(2).toNumber(),
+        totalCalculatedFinePreview: totalFinePreview.toDecimalPlaces(2).toNumber(),
         invoiceCount: formattedInvoices.length,
         statusBreakdown,
       },
@@ -950,3 +1019,4 @@ export class FeeGenerationService {
     };
   }
 }
+
