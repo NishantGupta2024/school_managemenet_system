@@ -730,4 +730,388 @@ describe('Phase 2D-A: Excel Import Module (e2e)', () => {
       expect(previewRes.body.invalidRows[0].errors[0]).toContain("Student with admission number 'ADM-IMP-201' not found");
     });
   });
+
+  describe('10. Phase 2D-A Integrity Audit Regression Tests', () => {
+    it('rejects percentage concession > 100% on confirm and writes zero records', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/api/v1/excel-imports/confirm')
+        .set('Authorization', `Bearer ${tokenSchoolAAdmin}`)
+        .send({
+          importType: 'FEE_ALLOCATION',
+          academicYearId: sessionAId,
+          rows: [
+            {
+              rowNumber: 2,
+              admissionNumber: 'ADM-IMP-202',
+              feeStructureName: feeStructureAName,
+              concessionType: 'PERCENTAGE',
+              concessionValue: 125,
+              startBillingMonth: 1,
+            },
+          ],
+        })
+        .expect(400);
+
+      expect(res.body.insertedCount).toBe(0);
+      expect(res.body.failedCount).toBe(1);
+      expect(res.body.errors[0].message).toContain('Percentage concession cannot exceed 100%');
+
+      const student202 = await prisma.student.findFirst({
+        where: { schoolId: schoolAId, admissionNumber: 'ADM-IMP-202' },
+      });
+      const alloc = await prisma.studentFeeAllocation.findFirst({
+        where: { schoolId: schoolAId, studentId: student202!.id, academicYearId: sessionAId },
+      });
+      expect(alloc).toBeNull();
+    });
+
+    it('rejects negative concession values on both preview and confirm', async () => {
+      const headers = ['Admission Number', 'Fee Structure Name', 'Concession Type', 'Concession Value'];
+      const rows = [['ADM-IMP-202', feeStructureAName, 'FLAT_DISCOUNT', '-500']];
+      const buffer = await createWorkbookBuffer('FeeAllocations', headers, rows);
+
+      const previewRes = await request(app.getHttpServer())
+        .post('/api/v1/excel-imports/preview')
+        .set('Authorization', `Bearer ${tokenSchoolAAdmin}`)
+        .attach('file', buffer, 'neg-concession.xlsx')
+        .field('type', 'FEE_ALLOCATION')
+        .field('academicYearId', sessionAId)
+        .expect(201);
+
+      expect(previewRes.body.validCount).toBe(0);
+      expect(previewRes.body.invalidCount).toBe(1);
+      expect(previewRes.body.invalidRows[0].errors[0]).toContain('non-negative number');
+
+      const confirmRes = await request(app.getHttpServer())
+        .post('/api/v1/excel-imports/confirm')
+        .set('Authorization', `Bearer ${tokenSchoolAAdmin}`)
+        .send({
+          importType: 'FEE_ALLOCATION',
+          academicYearId: sessionAId,
+          rows: [
+            {
+              rowNumber: 2,
+              admissionNumber: 'ADM-IMP-202',
+              feeStructureName: feeStructureAName,
+              concessionType: 'FLAT_DISCOUNT',
+              concessionValue: -500,
+              startBillingMonth: 1,
+            },
+          ],
+        })
+        .expect(400);
+
+      expect(confirmRes.body.insertedCount).toBe(0);
+      expect(confirmRes.body.errors[0].message).toContain('non-negative');
+    });
+
+    it('rejects flat discount exceeding structure annual base fee on both preview and confirm', async () => {
+      // feeStructureA has 3000 MONTHLY => 36,000 annual base fee. Test 50,000 flat discount.
+      const headers = ['Admission Number', 'Fee Structure Name', 'Concession Type', 'Concession Value'];
+      const rows = [['ADM-IMP-202', feeStructureAName, 'FLAT_DISCOUNT', '50000']];
+      const buffer = await createWorkbookBuffer('FeeAllocations', headers, rows);
+
+      const previewRes = await request(app.getHttpServer())
+        .post('/api/v1/excel-imports/preview')
+        .set('Authorization', `Bearer ${tokenSchoolAAdmin}`)
+        .attach('file', buffer, 'excess-flat.xlsx')
+        .field('type', 'FEE_ALLOCATION')
+        .field('academicYearId', sessionAId)
+        .expect(201);
+
+      expect(previewRes.body.validCount).toBe(0);
+      expect(previewRes.body.invalidCount).toBe(1);
+      expect(previewRes.body.invalidRows[0].errors[0]).toContain('exceeds structure annual gross fee');
+
+      const confirmRes = await request(app.getHttpServer())
+        .post('/api/v1/excel-imports/confirm')
+        .set('Authorization', `Bearer ${tokenSchoolAAdmin}`)
+        .send({
+          importType: 'FEE_ALLOCATION',
+          academicYearId: sessionAId,
+          rows: [
+            {
+              rowNumber: 2,
+              admissionNumber: 'ADM-IMP-202',
+              feeStructureName: feeStructureAName,
+              concessionType: 'FLAT_DISCOUNT',
+              concessionValue: 50000,
+              startBillingMonth: 1,
+            },
+          ],
+        })
+        .expect(400);
+
+      expect(confirmRes.body.insertedCount).toBe(0);
+      expect(confirmRes.body.errors[0].message).toContain('exceeds structure annual gross fee');
+    });
+
+    it('rejects invalid, fractional, and out-of-range startBillingMonth values on preview and confirm', async () => {
+      const headers = ['Admission Number', 'Fee Structure Name', 'Start Billing Month'];
+      const rows = [
+        ['ADM-IMP-202', feeStructureAName, '1.5'],
+        ['ADM-IMP-202', feeStructureAName, '0'],
+        ['ADM-IMP-202', feeStructureAName, '13'],
+        ['ADM-IMP-202', feeStructureAName, 'APRIL'],
+      ];
+      const buffer = await createWorkbookBuffer('FeeAllocations', headers, rows);
+
+      const previewRes = await request(app.getHttpServer())
+        .post('/api/v1/excel-imports/preview')
+        .set('Authorization', `Bearer ${tokenSchoolAAdmin}`)
+        .attach('file', buffer, 'invalid-months.xlsx')
+        .field('type', 'FEE_ALLOCATION')
+        .field('academicYearId', sessionAId)
+        .expect(201);
+
+      expect(previewRes.body.validCount).toBe(0);
+      expect(previewRes.body.invalidCount).toBe(4);
+
+      for (const badMonth of [0, 13, 1.5, '1.5', -2, 'abc']) {
+        const confirmRes = await request(app.getHttpServer())
+          .post('/api/v1/excel-imports/confirm')
+          .set('Authorization', `Bearer ${tokenSchoolAAdmin}`)
+          .send({
+            importType: 'FEE_ALLOCATION',
+            academicYearId: sessionAId,
+            rows: [
+              {
+                rowNumber: 2,
+                admissionNumber: 'ADM-IMP-202',
+                feeStructureName: feeStructureAName,
+                concessionType: 'NONE',
+                concessionValue: 0,
+                startBillingMonth: badMonth,
+              },
+            ],
+          })
+          .expect(400);
+
+        expect(confirmRes.body.insertedCount).toBe(0);
+        expect(confirmRes.body.errors[0].message).toContain('Start billing month must be an integer between 1 (April) and 12 (March)');
+      }
+    });
+
+    it('rejects confirmation batches exceeding 1,000 rows at both DTO and service levels', async () => {
+      const oversizedRows = Array.from({ length: 1001 }, (_, idx) => ({
+        rowNumber: idx + 2,
+      }));
+
+      // 1. Verify HTTP / DTO level (@ArrayMaxSize(1000))
+      const res = await request(app.getHttpServer())
+        .post('/api/v1/excel-imports/confirm')
+        .set('Authorization', `Bearer ${tokenSchoolAAdmin}`)
+        .send({
+          importType: 'STUDENT_MASTER',
+          academicYearId: sessionAId,
+          rows: oversizedRows,
+        })
+        .expect(400);
+
+      const msgStr = JSON.stringify(res.body.message);
+      expect(msgStr).toContain('1,000');
+
+      // 2. Verify service-level guard directly
+      const excelImportsService = app.get(
+        (await import('../src/excel-imports/excel-imports.service')).ExcelImportsService,
+      );
+      await expect(
+        excelImportsService.confirmImport(schoolAId, '00000000-0000-0000-0000-000000000010', {
+          importType: 'STUDENT_MASTER' as any,
+          academicYearId: sessionAId,
+          rows: oversizedRows,
+        }),
+      ).rejects.toThrow(/exceeds maximum limit of 1000 rows/);
+    });
+
+    it('enforces strict all-or-nothing batch validation: rejects entire batch when any row is tampered', async () => {
+      // Row 1 is completely valid (ADM-IMP-301), Row 2 is tampered with an invalid concession type/grade
+      const confirmRes = await request(app.getHttpServer())
+        .post('/api/v1/excel-imports/confirm')
+        .set('Authorization', `Bearer ${tokenSchoolAAdmin}`)
+        .send({
+          importType: 'STUDENT_MASTER',
+          academicYearId: sessionAId,
+          rows: [
+            {
+              rowNumber: 2,
+              admissionNumber: 'ADM-IMP-301',
+              firstName: 'VVS',
+              lastName: 'Laxman',
+              gradeCode: gradeACode,
+              section: 'A',
+            },
+            {
+              rowNumber: 3,
+              admissionNumber: 'ADM-IMP-302',
+              firstName: 'Anil',
+              lastName: 'Kumble',
+              gradeCode: 'NON-EXISTENT-GRADE-999',
+              section: 'A',
+            },
+          ],
+        })
+        .expect(400);
+
+      expect(confirmRes.body.insertedCount).toBe(0);
+      expect(confirmRes.body.failedCount).toBe(1);
+      expect(confirmRes.body.errors[0].rowNumber).toBe(3);
+
+      // Verify that valid Row 1 (ADM-IMP-301) was NOT written to the database
+      const student301 = await prisma.student.findFirst({
+        where: { schoolId: schoolAId, admissionNumber: 'ADM-IMP-301' },
+      });
+      expect(student301).toBeNull();
+    });
+
+    it('rolls back entire transaction on unexpected database error and sanitizes error response', async () => {
+      // Simulate an unexpected database error on the second student creation inside the Prisma transaction
+      const origTransaction = prisma.$transaction.bind(prisma);
+      const txSpy = jest.spyOn(prisma, '$transaction').mockImplementationOnce(async (fn: any, options?: any) => {
+        return origTransaction(async (tx: any) => {
+          let callCount = 0;
+          const origCreate = tx.student.create.bind(tx.student);
+          tx.student.create = async (args: any) => {
+            callCount++;
+            if (callCount === 2) {
+              const dbErr: any = new Error(
+                'RAW_SQL_LEAK: relation "public.students" violated internal constraint idx_secret_schema_detail',
+              );
+              dbErr.code = 'P2099';
+              throw dbErr;
+            }
+            return origCreate(args);
+          };
+          return fn(tx);
+        }, options);
+      });
+
+      try {
+        const res = await request(app.getHttpServer())
+          .post('/api/v1/excel-imports/confirm')
+          .set('Authorization', `Bearer ${tokenSchoolAAdmin}`)
+          .send({
+            importType: 'STUDENT_MASTER',
+            academicYearId: sessionAId,
+            rows: [
+              {
+                rowNumber: 2,
+                admissionNumber: 'ADM-IMP-303',
+                firstName: 'Virender',
+                lastName: 'Sehwag',
+                gradeCode: gradeACode,
+                section: 'A',
+              },
+              {
+                rowNumber: 3,
+                admissionNumber: 'ADM-IMP-304',
+                firstName: 'Zaheer',
+                lastName: 'Khan',
+                gradeCode: gradeACode,
+                section: 'A',
+              },
+            ],
+          })
+          .expect(500);
+
+        // 1. Response must not leak raw SQL / Prisma error message
+        const bodyText = JSON.stringify(res.body);
+        expect(bodyText).not.toContain('RAW_SQL_LEAK');
+        expect(bodyText).not.toContain('public.students');
+        expect(bodyText).not.toContain('idx_secret_schema_detail');
+        expect(res.body.message).toContain('rolled back');
+        expect(res.body.insertedCount).toBe(0);
+
+        // 2. Verify Row 1 (ADM-IMP-303) was completely rolled back and NOT persisted
+        const rolledBackStudent = await prisma.student.findFirst({
+          where: { schoolId: schoolAId, admissionNumber: 'ADM-IMP-303' },
+        });
+        expect(rolledBackStudent).toBeNull();
+      } finally {
+        txSpy.mockRestore();
+      }
+    });
+
+    it('correctly parses Indian dates (DD/MM/YYYY, DD-MM-YYYY), leap years, Excel Date objects, and rejects impossible calendar dates', async () => {
+      const headers = [
+        'Admission Number',
+        'First Name',
+        'Last Name',
+        'Grade Code',
+        'Section',
+        'Date of Birth (YYYY-MM-DD / DD/MM/YYYY)',
+        'Admission Date (YYYY-MM-DD / DD/MM/YYYY)',
+      ];
+      const rows = [
+        // 1. Ambiguous day-first Indian date 05/10/2026 -> must be 5 Oct 2026 (2026-10-05), NOT May 10
+        ['ADM-IMP-401', 'Aarav', 'Patel', gradeACode, 'A', '15/08/2010', '05/10/2026'],
+        // 2. Dash-separated Indian date + valid leap day 29/02/2024
+        ['ADM-IMP-402', 'Diya', 'Nair', gradeACode, 'A', '29-02-2012', '29/02/2024'],
+        // 3. Excel-native Date object
+        ['ADM-IMP-403', 'Kabir', 'Singh', gradeACode, 'A', new Date(Date.UTC(2011, 11, 25)), '2026-04-01'],
+        // 4. Impossible calendar date: 31/02/2026
+        ['ADM-IMP-404', 'Invalid', 'Feb31', gradeACode, 'A', '31/02/2026', '2026-04-01'],
+        // 5. Non-leap year Feb 29: 29/02/2026
+        ['ADM-IMP-405', 'Invalid', 'NonLeap', gradeACode, 'A', '29/02/2026', '2026-04-01'],
+      ];
+
+      const buffer = await createWorkbookBuffer('Students', headers, rows);
+
+      const previewRes = await request(app.getHttpServer())
+        .post('/api/v1/excel-imports/preview')
+        .set('Authorization', `Bearer ${tokenSchoolAAdmin}`)
+        .attach('file', buffer, 'dates-test.xlsx')
+        .field('type', 'STUDENT_MASTER')
+        .field('academicYearId', sessionAId)
+        .expect(201);
+
+      expect(previewRes.body.validCount).toBe(3);
+      expect(previewRes.body.invalidCount).toBe(2);
+
+      // Verify Indian date 05/10/2026 parsed as 2026-10-05 (Oct 5) and 15/08/2010 as 2010-08-15
+      const row401 = previewRes.body.validRows.find((r: any) => r.admissionNumber === 'ADM-IMP-401');
+      expect(row401.dateOfBirth).toBe('2010-08-15');
+      expect(row401.admissionDate).toBe('2026-10-05');
+
+      // Verify leap year dates 29-02-2012 and 29/02/2024
+      const row402 = previewRes.body.validRows.find((r: any) => r.admissionNumber === 'ADM-IMP-402');
+      expect(row402.dateOfBirth).toBe('2012-02-29');
+      expect(row402.admissionDate).toBe('2024-02-29');
+
+      // Verify Excel-native Date instance
+      const row403 = previewRes.body.validRows.find((r: any) => r.admissionNumber === 'ADM-IMP-403');
+      expect(row403.dateOfBirth).toBe('2011-12-25');
+      expect(row403.admissionDate).toBe('2026-04-01');
+
+      // Verify impossible dates were rejected on preview
+      const invalidAdmissions = previewRes.body.invalidRows.map((r: any) => r.data.admissionNumber);
+      expect(invalidAdmissions).toContain('ADM-IMP-404');
+      expect(invalidAdmissions).toContain('ADM-IMP-405');
+
+      // Also verify confirm rejects impossible dates if tampered
+      const badConfirm = await request(app.getHttpServer())
+        .post('/api/v1/excel-imports/confirm')
+        .set('Authorization', `Bearer ${tokenSchoolAAdmin}`)
+        .send({
+          importType: 'STUDENT_MASTER',
+          academicYearId: sessionAId,
+          rows: [
+            {
+              rowNumber: 2,
+              admissionNumber: 'ADM-IMP-404',
+              firstName: 'Invalid',
+              lastName: 'Feb31',
+              gradeCode: gradeACode,
+              section: 'A',
+              dateOfBirth: '31/02/2026',
+            },
+          ],
+        })
+        .expect(400);
+
+      expect(badConfirm.body.insertedCount).toBe(0);
+      expect(badConfirm.body.errors[0].message).toContain('Invalid Date of Birth format');
+    });
+  });
 });
+

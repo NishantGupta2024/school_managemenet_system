@@ -1,4 +1,4 @@
-import { IsArray, IsEnum, IsNotEmpty, IsOptional, IsUUID } from 'class-validator';
+import { ArrayMaxSize, ArrayMinSize, IsArray, IsEnum, IsNotEmpty, IsOptional, IsUUID } from 'class-validator';
 import { ImportType } from './preview-import.dto';
 
 export class ConfirmImportDto {
@@ -16,5 +16,8 @@ export class ConfirmImportDto {
 
   @IsArray({ message: 'Rows must be provided as an array' })
   @IsNotEmpty({ message: 'Rows cannot be empty' })
+  @ArrayMinSize(1, { message: 'At least one row is required for import confirmation' })
+  @ArrayMaxSize(1000, { message: 'Cannot confirm more than 1,000 rows in a single batch' })
   rows: Record<string, any>[];
 }
+

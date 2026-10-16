@@ -38,6 +38,7 @@ export const ExcelImportView: React.FC = () => {
   const [confirmLoading, setConfirmLoading] = useState<boolean>(false);
   const [downloadingTemplate, setDownloadingTemplate] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [batchErrors, setBatchErrors] = useState<{ rowNumber: number; message: string }[]>([]);
 
   // Workflow states
   const [previewData, setPreviewData] = useState<ImportPreviewResult | null>(null);
@@ -93,6 +94,7 @@ export const ExcelImportView: React.FC = () => {
       }
       setFile(selected);
       setErrorMessage(null);
+      setBatchErrors([]);
       setPreviewData(null);
       setConfirmResult(null);
     }
@@ -119,6 +121,7 @@ export const ExcelImportView: React.FC = () => {
       }
       setFile(dropped);
       setErrorMessage(null);
+      setBatchErrors([]);
       setPreviewData(null);
       setConfirmResult(null);
     }
@@ -137,6 +140,7 @@ export const ExcelImportView: React.FC = () => {
     try {
       setPreviewLoading(true);
       setErrorMessage(null);
+      setBatchErrors([]);
       const res = await excelImportsApi.preview(file, importType, selectedAcademicYearId);
       setPreviewData(res);
       setActiveTab('ALL');
@@ -153,6 +157,7 @@ export const ExcelImportView: React.FC = () => {
     try {
       setConfirmLoading(true);
       setErrorMessage(null);
+      setBatchErrors([]);
       const res = await excelImportsApi.confirm({
         importType: previewData.importType,
         academicYearId: previewData.academicYearId,
@@ -161,7 +166,15 @@ export const ExcelImportView: React.FC = () => {
       setConfirmResult(res);
       setShowConfirmModal(false);
     } catch (err: any) {
-      setErrorMessage(err.response?.data?.message || 'Failed to execute import');
+      const data = err.response?.data;
+      const msg = Array.isArray(data?.message)
+        ? data.message.join('; ')
+        : data?.message || 'Failed to execute import. The batch was rejected and zero records were written.';
+      setErrorMessage(msg);
+      if (Array.isArray(data?.errors)) {
+        setBatchErrors(data.errors);
+      }
+      setShowConfirmModal(false);
     } finally {
       setConfirmLoading(false);
     }
@@ -172,6 +185,7 @@ export const ExcelImportView: React.FC = () => {
     setPreviewData(null);
     setConfirmResult(null);
     setErrorMessage(null);
+    setBatchErrors([]);
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
@@ -187,7 +201,7 @@ export const ExcelImportView: React.FC = () => {
             <h1 className="text-xl font-bold text-slate-900">Excel Data Import Engine</h1>
           </div>
           <p className="text-xs text-slate-500 mt-1">
-            Secure, tenant-isolated bulk data onboarding with preview validation, duplicate detection, and explicit confirmation.
+            Secure, tenant-isolated bulk data onboarding with preview validation, duplicate detection, and strict all-or-nothing atomic confirmation.
           </p>
         </div>
 
@@ -234,11 +248,23 @@ export const ExcelImportView: React.FC = () => {
         <div className="bg-rose-50 border border-rose-200 rounded-xl p-4 flex items-start gap-3">
           <ShieldAlert className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
           <div className="flex-1">
-            <h3 className="text-sm font-semibold text-rose-900">Import Error</h3>
+            <h3 className="text-sm font-semibold text-rose-900">Import Rejected / Rolled Back</h3>
             <p className="text-xs text-rose-700 mt-0.5">{errorMessage}</p>
+            {batchErrors.length > 0 && (
+              <ul className="mt-2 text-xs text-rose-700 list-disc pl-5 space-y-1">
+                {batchErrors.map((err, i) => (
+                  <li key={i}>
+                    Row {err.rowNumber}: {err.message}
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
           <button
-            onClick={() => setErrorMessage(null)}
+            onClick={() => {
+              setErrorMessage(null);
+              setBatchErrors([]);
+            }}
             className="text-rose-500 hover:text-rose-700 text-xs font-semibold"
           >
             Dismiss
@@ -375,7 +401,7 @@ export const ExcelImportView: React.FC = () => {
                       Click to browse or drag & drop spreadsheet here
                     </span>
                     <span className="text-xs text-slate-400 mt-1">
-                      Supports Excel .xlsx files up to 5MB (max 1000 rows)
+                      Supports Excel .xlsx files up to 5MB (max 1,000 rows) • Accepted dates: YYYY-MM-DD, DD/MM/YYYY, DD-MM-YYYY
                     </span>
                   </>
                 )}
@@ -387,7 +413,7 @@ export const ExcelImportView: React.FC = () => {
           <div className="flex items-center justify-between pt-2 border-t border-slate-100">
             <div className="flex items-center gap-1.5 text-xs text-slate-500">
               <Info className="w-4 h-4 text-slate-400" />
-              Previewing parses and validates rows without making any database changes.
+              Previewing parses and validates rows without making any database changes. Accepted date formats: YYYY-MM-DD, DD/MM/YYYY, DD-MM-YYYY.
             </div>
 
             <button
@@ -591,7 +617,7 @@ export const ExcelImportView: React.FC = () => {
                             <td className="py-3 px-4 font-medium text-indigo-700">
                               {row.gradeName || row.gradeCode}
                             </td>
-                            <td className="py-3 px-4 text-slate-600">{row.sectionName || '-'}</td>
+                            <td className="py-3 px-4 text-slate-600">{row.sectionName || row.section || '-'}</td>
                             <td className="py-3 px-4 font-mono text-slate-500">{row.rollNumber || '-'}</td>
                             <td className="py-3 px-4 text-slate-500">
                               {row.guardianName ? (
@@ -810,7 +836,7 @@ export const ExcelImportView: React.FC = () => {
             </div>
 
             <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-[11px] text-amber-800 mb-5">
-              <strong>Notice:</strong> Only valid rows will be committed. Invalid and duplicate rows will be safely excluded without modifying existing records.
+              <strong>Strict All-or-Nothing Execution:</strong> Only the {previewData.validCount} valid row(s) are submitted for confirmation. The server re-validates the entire batch before writing; if any row fails validation or encounters a database error, the entire transaction is rolled back and zero records are committed.
             </div>
 
             <div className="flex items-center justify-end gap-3">
@@ -853,9 +879,9 @@ export const ExcelImportView: React.FC = () => {
               <CheckCircle2 className="w-8 h-8" />
             </div>
             <div>
-              <h2 className="text-lg font-bold text-slate-900">Import Completed Successfully</h2>
+              <h2 className="text-lg font-bold text-slate-900">Import Completed Atomically</h2>
               <p className="text-xs text-slate-500 mt-0.5">
-                Transactional batch execution finished. Records have been securely committed.
+                All-or-nothing database transaction succeeded. All accepted records have been committed.
               </p>
             </div>
           </div>
