@@ -13,6 +13,7 @@ import { FeeGenerationModule } from './fee-generation/fee-generation.module';
 import { ExcelImportsModule } from './excel-imports/excel-imports.module';
 import { FineRulesModule } from './fine-rules/fine-rules.module';
 import { PaymentsModule } from './payments/payments.module';
+import { NotificationsModule } from './notifications/notifications.module';
 
 @Module({
   imports: [
@@ -32,6 +33,7 @@ import { PaymentsModule } from './payments/payments.module';
     ExcelImportsModule,
     FineRulesModule,
     PaymentsModule,
+    NotificationsModule,
   ],
 })
 export class AppModule implements NestModule {

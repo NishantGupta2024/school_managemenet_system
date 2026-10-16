@@ -143,6 +143,26 @@ enum FineRuleStatus {
   INACTIVE
 }
 
+enum NotificationChannel {
+  EMAIL
+}
+
+enum NotificationStatus {
+  PENDING
+  PROCESSING
+  SENT
+  FAILED
+  SKIPPED
+  CANCELLED
+}
+
+enum NotificationEventType {
+  RECEIPT_ISSUED
+  PAYMENT_REVERSED
+  REFUND_SUCCEEDED
+  REFUND_FAILED
+}
+
 // -------------------------------------------------------------
 // Core Multi-Tenant Foundation: School / Tenant
 // -------------------------------------------------------------
@@ -185,6 +205,8 @@ model School {
   paymentRefundAllocations  PaymentRefundAllocation[]
   paymentReversals          PaymentReversal[]
   reversalSequenceCounters  ReversalSequenceCounter[]
+  notificationOutboxRecords NotificationOutbox[]
+  notificationSettings      SchoolNotificationSetting?
 
   @@map("schools")
 }
@@ -235,17 +257,17 @@ model AcademicYear {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  school                  School                     @relation(fields: [schoolId], references: [id], onDelete: Cascade)
-  students                Student[]
-  feeStructures           FeeStructure[]
-  studentFeeAllocations   StudentFeeAllocation[]
-  invoices                FeeInvoice[]
-  feeGenerationRuns       FeeGenerationRun[]
-  oneTimeBillings         StudentOneTimeFeeBilling[]
-  fineRules               FineRule[]
-  payments                Payment[]
-  receiptSequenceCounters ReceiptSequenceCounter[]
-  receipts                Receipt[]
+  school                   School                     @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  students                 Student[]
+  feeStructures            FeeStructure[]
+  studentFeeAllocations    StudentFeeAllocation[]
+  invoices                 FeeInvoice[]
+  feeGenerationRuns        FeeGenerationRun[]
+  oneTimeBillings          StudentOneTimeFeeBilling[]
+  fineRules                FineRule[]
+  payments                 Payment[]
+  receiptSequenceCounters  ReceiptSequenceCounter[]
+  receipts                 Receipt[]
   reversalSequenceCounters ReversalSequenceCounter[]
 
   @@unique([schoolId, name])
@@ -494,10 +516,10 @@ model FeeInvoice {
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
 
-  school       School              @relation(fields: [schoolId], references: [id], onDelete: Cascade)
-  student      Student             @relation(fields: [schoolId, studentId], references: [schoolId, id], onDelete: Cascade)
-  academicYear AcademicYear        @relation(fields: [schoolId, academicYearId], references: [schoolId, id], onDelete: Cascade)
-  items        InvoiceItem[]
+  school             School              @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  student            Student             @relation(fields: [schoolId, studentId], references: [schoolId, id], onDelete: Cascade)
+  academicYear       AcademicYear        @relation(fields: [schoolId, academicYearId], references: [schoolId, id], onDelete: Cascade)
+  items              InvoiceItem[]
   paymentAllocations PaymentAllocation[]
   assessedFines      AssessedFine[]
   fineWaivers        FineWaiver[]
@@ -516,16 +538,16 @@ model FeeInvoice {
 // Invoice Item: Line-Item Snapshot within Monthly Invoice
 // -------------------------------------------------------------
 model InvoiceItem {
-  id                       String              @id @default(uuid())
+  id                       String       @id @default(uuid())
   schoolId                 String
   invoiceId                String
   feeHeadId                String
   feeHeadNameSnapshot      String
-  grossAmount              Decimal             @db.Decimal(12, 2)
-  discountAmount           Decimal             @db.Decimal(12, 2)
-  netAmount                Decimal             @db.Decimal(12, 2)
+  grossAmount              Decimal      @db.Decimal(12, 2)
+  discountAmount           Decimal      @db.Decimal(12, 2)
+  netAmount                Decimal      @db.Decimal(12, 2)
   billingFrequencySnapshot FeeFrequency
-  createdAt                DateTime            @default(now())
+  createdAt                DateTime     @default(now())
 
   school             School              @relation(fields: [schoolId], references: [id], onDelete: Cascade)
   invoice            FeeInvoice          @relation(fields: [schoolId, invoiceId], references: [schoolId, id], onDelete: Cascade)
@@ -644,9 +666,9 @@ model FineRule {
   createdAt           DateTime           @default(now())
   updatedAt           DateTime           @updatedAt
 
-  school            School       @relation(fields: [schoolId], references: [id], onDelete: Cascade)
-  academicYear      AcademicYear @relation(fields: [schoolId, academicYearId], references: [schoolId, id], onDelete: Cascade)
-  applicableFeeHead FeeHead?     @relation(fields: [schoolId, applicableFeeHeadId], references: [schoolId, id], onDelete: Restrict)
+  school            School         @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  academicYear      AcademicYear   @relation(fields: [schoolId, academicYearId], references: [schoolId, id], onDelete: Cascade)
+  applicableFeeHead FeeHead?       @relation(fields: [schoolId, applicableFeeHeadId], references: [schoolId, id], onDelete: Restrict)
   createdBy         User?          @relation("FineRuleCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
   updatedBy         User?          @relation("FineRuleUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: SetNull)
   assessedFines     AssessedFine[]
@@ -668,12 +690,12 @@ model FineRule {
 // Receipt Sequence Counter: Atomic Monotonic Sequence Tracker
 // -------------------------------------------------------------
 model ReceiptSequenceCounter {
-  id             String       @id @default(uuid())
+  id             String   @id @default(uuid())
   schoolId       String
   academicYearId String
-  prefix         String       @default("RCT")
-  nextSequence   Int          @default(1)
-  updatedAt      DateTime     @updatedAt
+  prefix         String   @default("RCT")
+  nextSequence   Int      @default(1)
+  updatedAt      DateTime @updatedAt
 
   school       School       @relation(fields: [schoolId], references: [id], onDelete: Cascade)
   academicYear AcademicYear @relation(fields: [schoolId, academicYearId], references: [schoolId, id], onDelete: Cascade)
@@ -689,12 +711,12 @@ model ReceiptSequenceCounter {
 // Reversal Sequence Counter: Atomic Monotonic Sequence Tracker for Reversals
 // -------------------------------------------------------------
 model ReversalSequenceCounter {
-  id             String       @id @default(uuid())
+  id             String   @id @default(uuid())
   schoolId       String
   academicYearId String
-  prefix         String       @default("REV")
-  nextSequence   Int          @default(1)
-  updatedAt      DateTime     @updatedAt
+  prefix         String   @default("REV")
+  nextSequence   Int      @default(1)
+  updatedAt      DateTime @updatedAt
 
   school       School       @relation(fields: [schoolId], references: [id], onDelete: Cascade)
   academicYear AcademicYear @relation(fields: [schoolId, academicYearId], references: [schoolId, id], onDelete: Cascade)
@@ -714,18 +736,18 @@ model Payment {
   schoolId           String
   studentId          String
   academicYearId     String
-  paymentNumber      String        // e.g. "PAY-2026-00001"
+  paymentNumber      String // e.g. "PAY-2026-00001"
   paymentDate        DateTime      @default(now())
   amount             Decimal       @db.Decimal(12, 2)
   paymentMethod      PaymentMethod @default(CASH)
-  referenceNumber    String?       // UTR, UPI transaction ref, bank deposit ref
+  referenceNumber    String? // UTR, UPI transaction ref, bank deposit ref
   chequeNumber       String?
   chequeDate         DateTime?
   bankName           String?
   notes              String?
   status             PaymentStatus @default(COMPLETED)
   idempotencyKey     String?
-  requestHash        String?       // SHA-256 hash of canonical request payload
+  requestHash        String? // SHA-256 hash of canonical request payload
   collectedByUserId  String?
   cancelledAt        DateTime?
   cancelledByUserId  String?
@@ -758,24 +780,24 @@ model Payment {
 // Payment Allocation: Line-Item & Fine Settlement Ledger
 // -------------------------------------------------------------
 model PaymentAllocation {
-  id                     String             @id @default(uuid())
+  id                     String         @id @default(uuid())
   schoolId               String
   paymentId              String
   invoiceId              String
-  invoiceItemId          String?            // Null if allocation is for a late fine
-  assessedFineId         String?            // Null if allocation is for base fee item
-  reversalOfAllocationId String?            // References original allocation if this is a reversal
-  paymentReversalId      String?            // References PaymentReversal master record if this is a reversal
-  allocationType         AllocationType     @default(PRINCIPAL)
-  allocatedAmount        Decimal            @db.Decimal(12, 2)
-  createdAt              DateTime           @default(now())
+  invoiceItemId          String? // Null if allocation is for a late fine
+  assessedFineId         String? // Null if allocation is for base fee item
+  reversalOfAllocationId String? // References original allocation if this is a reversal
+  paymentReversalId      String? // References PaymentReversal master record if this is a reversal
+  allocationType         AllocationType @default(PRINCIPAL)
+  allocatedAmount        Decimal        @db.Decimal(12, 2)
+  createdAt              DateTime       @default(now())
 
-  school          School              @relation(fields: [schoolId], references: [id], onDelete: Cascade)
-  payment         Payment             @relation(fields: [schoolId, paymentId], references: [schoolId, id], onDelete: Restrict)
-  invoice         FeeInvoice          @relation(fields: [schoolId, invoiceId], references: [schoolId, id], onDelete: Restrict)
-  invoiceItem     InvoiceItem?        @relation(fields: [schoolId, invoiceItemId], references: [schoolId, id], onDelete: Restrict)
-  assessedFine    AssessedFine?       @relation(fields: [schoolId, assessedFineId], references: [schoolId, id], onDelete: Restrict)
-  reversalOf      PaymentAllocation?  @relation("AllocationReversals", fields: [schoolId, reversalOfAllocationId], references: [schoolId, id], onDelete: Restrict)
+  school            School                    @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  payment           Payment                   @relation(fields: [schoolId, paymentId], references: [schoolId, id], onDelete: Restrict)
+  invoice           FeeInvoice                @relation(fields: [schoolId, invoiceId], references: [schoolId, id], onDelete: Restrict)
+  invoiceItem       InvoiceItem?              @relation(fields: [schoolId, invoiceItemId], references: [schoolId, id], onDelete: Restrict)
+  assessedFine      AssessedFine?             @relation(fields: [schoolId, assessedFineId], references: [schoolId, id], onDelete: Restrict)
+  reversalOf        PaymentAllocation?        @relation("AllocationReversals", fields: [schoolId, reversalOfAllocationId], references: [schoolId, id], onDelete: Restrict)
   reversals         PaymentAllocation[]       @relation("AllocationReversals")
   paymentReversal   PaymentReversal?          @relation(fields: [schoolId, paymentReversalId], references: [schoolId, id], onDelete: Restrict)
   refundAllocations PaymentRefundAllocation[]
@@ -825,14 +847,14 @@ model AssessedFine {
 // Fine Waiver: Authorized Forgiveness Record
 // -------------------------------------------------------------
 model FineWaiver {
-  id                 String        @id @default(uuid())
+  id                 String   @id @default(uuid())
   schoolId           String
   invoiceId          String
   assessedFineId     String?
-  waivedAmount       Decimal       @db.Decimal(12, 2)
+  waivedAmount       Decimal  @db.Decimal(12, 2)
   reason             String
   authorizedByUserId String?
-  createdAt          DateTime      @default(now())
+  createdAt          DateTime @default(now())
 
   school           School        @relation(fields: [schoolId], references: [id], onDelete: Cascade)
   invoice          FeeInvoice    @relation(fields: [schoolId, invoiceId], references: [schoolId, id], onDelete: Restrict)
@@ -853,13 +875,13 @@ model Receipt {
   id              String        @id @default(uuid())
   schoolId        String
   paymentId       String        @unique
-  receiptNumber   String        // e.g. "RCT-202627-00104"
-  receiptSequence Int           // Monotonic counter per school and academic year
+  receiptNumber   String // e.g. "RCT-202627-00104"
+  receiptSequence Int // Monotonic counter per school and academic year
   academicYearId  String
   issuedDate      DateTime      @default(now())
   totalAmount     Decimal       @db.Decimal(12, 2)
   status          ReceiptStatus @default(ACTIVE)
-  receiptSnapshot Json          // Frozen JSON snapshot of student, line items, cashier, etc.
+  receiptSnapshot Json // Frozen JSON snapshot of student, line items, cashier, etc.
   createdAt       DateTime      @default(now())
 
   school       School       @relation(fields: [schoolId], references: [id], onDelete: Cascade)
@@ -892,7 +914,7 @@ model PaymentRefund {
   failureReason      String?
   mode               String       @default("CASH")
   status             RefundStatus @default(SUCCEEDED)
-  referenceNumber    String?      // e.g. bank transfer UTR or refund voucher number
+  referenceNumber    String? // e.g. bank transfer UTR or refund voucher number
   idempotencyKey     String?
   requestHash        String?
   createdAt          DateTime     @default(now())
@@ -941,7 +963,7 @@ model PaymentReversal {
   id                 String       @id @default(uuid())
   schoolId           String
   paymentId          String
-  reversalNumber     String       // e.g. "REV-202627-00001"
+  reversalNumber     String // e.g. "REV-202627-00001"
   reversalType       ReversalType @default(VOID)
   totalAmount        Decimal      @db.Decimal(12, 2)
   reason             String
@@ -962,4 +984,88 @@ model PaymentReversal {
   @@index([paymentId])
   @@index([reversalType])
   @@map("payment_reversals")
+}
+
+// -------------------------------------------------------------
+// Notification Outbox: Transactional Multi-Tenant Dispatch Store
+// -------------------------------------------------------------
+model NotificationOutbox {
+  id                String                @id @default(uuid())
+  schoolId          String
+  channel           NotificationChannel   @default(EMAIL)
+  eventType         NotificationEventType
+  recipientEmail    String?
+  recipientName     String?
+  idempotencyKey    String
+  status            NotificationStatus    @default(PENDING)
+  templateKey       String
+  templateData      Json
+  attemptCount      Int                   @default(0)
+  nextAttemptAt     DateTime              @default(now())
+  lockedAt          DateTime?
+  lastAttemptAt     DateTime?
+  sentAt            DateTime?
+  skippedAt         DateTime?
+  skipReason        String?
+  lastErrorCode     String?
+  lastErrorMessage  String?
+  providerMessageId String?
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+
+  school           School                        @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  deliveryAttempts NotificationDeliveryAttempt[]
+
+  @@unique([schoolId, id])
+  @@unique([schoolId, idempotencyKey])
+  @@index([status, nextAttemptAt])
+  @@index([status, lockedAt])
+  @@index([schoolId, status])
+  @@index([schoolId, eventType])
+  @@index([schoolId, createdAt])
+  @@map("notification_outbox")
+}
+
+// -------------------------------------------------------------
+// Notification Delivery Attempt: Append-Only Dispatch Audit Log
+// -------------------------------------------------------------
+model NotificationDeliveryAttempt {
+  id                   String             @id @default(uuid())
+  notificationOutboxId String
+  attemptNumber        Int
+  startedAt            DateTime           @default(now())
+  completedAt          DateTime?
+  outcome              NotificationStatus
+  errorCode            String?
+  errorMessage         String?
+  providerMessageId    String?
+  retryScheduled       Boolean            @default(false)
+  createdAt            DateTime           @default(now())
+
+  notificationOutbox NotificationOutbox @relation(fields: [notificationOutboxId], references: [id], onDelete: Restrict)
+
+  @@unique([notificationOutboxId, attemptNumber])
+  @@index([notificationOutboxId, createdAt])
+  @@map("notification_delivery_attempts")
+}
+
+// -------------------------------------------------------------
+// School Notification Setting: Tenant-Scoped Preferences
+// -------------------------------------------------------------
+model SchoolNotificationSetting {
+  id                          String   @id @default(uuid())
+  schoolId                    String   @unique
+  receiptEmailEnabled         Boolean  @default(true)
+  paymentReversalEmailEnabled Boolean  @default(true)
+  refundSuccessEmailEnabled   Boolean  @default(true)
+  refundFailureEmailEnabled   Boolean  @default(true)
+  senderDisplayName           String?
+  replyToEmail                String?
+  createdAt                   DateTime @default(now())
+  updatedAt                   DateTime @updatedAt
+
+  school School @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+
+  @@unique([schoolId, id])
+  @@map("school_notification_settings")
 }
