@@ -22,6 +22,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ReceiptSequenceService } from './receipt-sequence.service';
 import { ReversalSequenceService } from './reversal-sequence.service';
 import { FeeGenerationService } from '../fee-generation/fee-generation.service';
+import { NotificationOutboxService } from '../notifications/outbox/notification-outbox.service';
 import { CollectPaymentDto } from './dto/collect-payment.dto';
 import { ReversePaymentDto } from './dto/reverse-payment.dto';
 import {
@@ -66,6 +67,7 @@ export class PaymentsService {
     private readonly receiptSequenceService: ReceiptSequenceService,
     private readonly reversalSequenceService: ReversalSequenceService,
     private readonly feeGenerationService: FeeGenerationService,
+    private readonly outboxService: NotificationOutboxService,
   ) {}
 
   /**
@@ -931,6 +933,17 @@ export class PaymentsService {
             }
           }
 
+          // O. Enqueue RECEIPT_ISSUED Notification Outbox Record within transaction
+          await this.outboxService.enqueueReceiptIssued(tx, {
+            schoolId,
+            receipt,
+            payment,
+            student,
+            school,
+            academicYear,
+            allocations: createdAllocations,
+          });
+
           return {
             payment,
             receipt,
@@ -1403,6 +1416,13 @@ export class PaymentsService {
 
           // 15. Synchronize Assessed Fine and Invoice Statuses on affected invoices
           await this.reconcileInvoicesAndFines(tx, schoolId, affectedInvoiceIds);
+
+          // 16. Enqueue PAYMENT_REVERSED Notification Outbox Record within transaction
+          await this.outboxService.enqueuePaymentReversed(tx, {
+            schoolId,
+            paymentReversal,
+            payment,
+          });
 
           return {
             reversal: paymentReversal,
@@ -2009,6 +2029,12 @@ export class PaymentsService {
               paymentId,
               affectedInvoiceIds,
             );
+
+            await this.outboxService.enqueueRefundSucceeded(tx, {
+              schoolId,
+              refund: paymentRefund,
+              paymentId,
+            });
           }
 
           return {
@@ -2140,6 +2166,12 @@ export class PaymentsService {
           affectedInvoiceIds,
         );
 
+        await this.outboxService.enqueueRefundSucceeded(tx, {
+          schoolId,
+          refund: updatedRefund,
+          paymentId: refund.paymentId,
+        });
+
         return updatedRefund;
       },
       {
@@ -2187,7 +2219,7 @@ export class PaymentsService {
           );
         }
 
-        return await tx.paymentRefund.update({
+        const updatedRefund = await tx.paymentRefund.update({
           where: { schoolId_id: { schoolId, id: refundId } },
           data: {
             status: RefundStatus.FAILED,
@@ -2198,6 +2230,14 @@ export class PaymentsService {
           },
           include: { allocations: true },
         });
+
+        await this.outboxService.enqueueRefundFailed(tx, {
+          schoolId,
+          refund: updatedRefund,
+          paymentId: refund.paymentId,
+        });
+
+        return updatedRefund;
       },
       {
         isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted,

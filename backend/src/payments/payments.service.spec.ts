@@ -24,6 +24,7 @@ import { FineRulesService } from '../fine-rules/fine-rules.service';
 import { ReceiptSequenceService } from './receipt-sequence.service';
 import { ReversalSequenceService } from './reversal-sequence.service';
 import { PaymentsService } from './payments.service';
+import { NotificationOutboxService } from '../notifications/outbox/notification-outbox.service';
 
 describe('PaymentsService — Payment Collection Engine & Accounting Invariants', () => {
   let service: PaymentsService;
@@ -67,6 +68,15 @@ describe('PaymentsService — Payment Collection Engine & Accounting Invariants'
         FineRulesService,
         FeeGenerationService,
         PaymentsService,
+        {
+          provide: NotificationOutboxService,
+          useValue: {
+            enqueueReceiptIssued: jest.fn().mockResolvedValue({ id: 'mock-outbox-rcpt' }),
+            enqueuePaymentReversed: jest.fn().mockResolvedValue({ id: 'mock-outbox-rev' }),
+            enqueueRefundSucceeded: jest.fn().mockResolvedValue({ id: 'mock-outbox-ref-s' }),
+            enqueueRefundFailed: jest.fn().mockResolvedValue({ id: 'mock-outbox-ref-f' }),
+          },
+        },
       ],
     }).compile();
 
