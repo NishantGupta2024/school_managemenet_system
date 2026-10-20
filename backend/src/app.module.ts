@@ -14,12 +14,13 @@ import { ExcelImportsModule } from './excel-imports/excel-imports.module';
 import { FineRulesModule } from './fine-rules/fine-rules.module';
 import { PaymentsModule } from './payments/payments.module';
 import { NotificationsModule } from './notifications/notifications.module';
+import { ReportsModule } from './reports/reports.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
-      envFilePath: '.env',
+      envFilePath: ['.env', 'backend/.env'],
     }),
     PrismaModule,
     TenantModule,
@@ -34,6 +35,7 @@ import { NotificationsModule } from './notifications/notifications.module';
     FineRulesModule,
     PaymentsModule,
     NotificationsModule,
+    ReportsModule,
   ],
 })
 export class AppModule implements NestModule {

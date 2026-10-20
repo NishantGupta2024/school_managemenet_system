@@ -314,6 +314,39 @@ export class PaymentsService {
           }
 
           if (targetInvoiceIds.length === 0) {
+            // Re-check for an existing payment under the same school and idempotency key before throwing.
+            // Under concurrent execution, an earlier request with the same key may have just committed
+            // and paid off all invoices, leaving candidateInvoices empty for this retry.
+            if (effectiveIdempotencyKey) {
+              const replayPayment = await tx.payment.findUnique({
+                where: {
+                  schoolId_idempotencyKey: {
+                    schoolId,
+                    idempotencyKey: effectiveIdempotencyKey,
+                  },
+                },
+                include: {
+                  allocations: true,
+                  receipt: true,
+                },
+              });
+
+              if (replayPayment) {
+                if (replayPayment.requestHash === requestHash) {
+                  return {
+                    payment: replayPayment,
+                    allocations: replayPayment.allocations,
+                    receipt: replayPayment.receipt,
+                    isIdempotentReplay: true,
+                  };
+                } else {
+                  throw new ConflictException(
+                    `Idempotency key '${effectiveIdempotencyKey}' was already used with a different request payload`,
+                  );
+                }
+              }
+            }
+
             throw new BadRequestException(
               'No outstanding invoices available to allocate this payment against in the specified academic year',
             );
@@ -2354,11 +2387,24 @@ export class PaymentsService {
   async findAllPayments(schoolId: string, user: any, query: any = {}) {
     const where: Prisma.PaymentWhereInput = { schoolId };
 
+    const page = Math.max(1, Number(query.page) || 1);
+    const limit = Math.min(100, Math.max(1, Number(query.limit) || 20));
+
     if (user.role === UserRole.STUDENT) {
       const student = await this.prisma.student.findFirst({
         where: { schoolId, userId: user.id },
       });
-      if (!student) return { data: [], total: 0 };
+      if (!student) {
+        return {
+          data: [],
+          meta: {
+            page,
+            limit,
+            total: 0,
+            totalPages: 0,
+          },
+        };
+      }
       where.studentId = student.id;
     } else if (user.role === UserRole.PARENT) {
       const relations = await this.prisma.parentStudentRelation.findMany({
@@ -2366,6 +2412,17 @@ export class PaymentsService {
         select: { studentId: true },
       });
       const studentIds = relations.map((r) => r.studentId);
+      if (studentIds.length === 0) {
+        return {
+          data: [],
+          meta: {
+            page,
+            limit,
+            total: 0,
+            totalPages: 0,
+          },
+        };
+      }
       where.studentId = { in: studentIds };
     } else {
       if (query.studentId) where.studentId = query.studentId;
@@ -2381,8 +2438,6 @@ export class PaymentsService {
       if (query.endDate) where.paymentDate.lte = new Date(query.endDate);
     }
 
-    const page = Math.max(1, Number(query.page) || 1);
-    const limit = Math.min(100, Math.max(1, Number(query.limit) || 20));
     const skip = (page - 1) * limit;
 
     const [data, total] = await Promise.all([
@@ -2508,5 +2563,129 @@ export class PaymentsService {
     }
 
     return receipt;
+  }
+
+  /**
+   * Looks up a prior payment collection, refund, or reversal operation by its idempotency key.
+   * Strictly tenant-scoped to schoolId and authorized for staff and admin roles.
+   */
+  async lookupByIdempotencyKey(schoolId: string, user: any, idempotencyKey: string) {
+    if (
+      !user ||
+      ![
+        UserRole.PLATFORM_SUPER_ADMIN,
+        UserRole.SCHOOL_ADMIN,
+        UserRole.FEE_STAFF,
+      ].includes(user.role)
+    ) {
+      throw new ForbiddenException('Access denied to operation lookup');
+    }
+
+    if (!idempotencyKey || typeof idempotencyKey !== 'string' || !idempotencyKey.trim()) {
+      throw new BadRequestException('Idempotency key is required');
+    }
+
+    const trimmedKey = idempotencyKey.trim();
+
+    // 1. Check Collection (Payment)
+    const payment = await this.prisma.payment.findUnique({
+      where: {
+        schoolId_idempotencyKey: {
+          schoolId,
+          idempotencyKey: trimmedKey,
+        },
+      },
+      include: {
+        receipt: true,
+      },
+    });
+
+    if (payment) {
+      return {
+        found: true,
+        operationType: 'COLLECTION',
+        status: payment.status,
+        payment: {
+          id: payment.id,
+          paymentNumber: payment.paymentNumber,
+          amount: Number(payment.amount),
+          paymentMethod: payment.paymentMethod,
+          status: payment.status,
+          paymentDate: payment.paymentDate,
+          studentId: payment.studentId,
+          academicYearId: payment.academicYearId,
+          referenceNumber: payment.referenceNumber,
+        },
+        receipt: payment.receipt
+          ? {
+              id: payment.receipt.id,
+              receiptNumber: payment.receipt.receiptNumber,
+              totalAmount: Number(payment.receipt.totalAmount),
+              status: payment.receipt.status,
+              issuedDate: payment.receipt.issuedDate,
+              receiptSnapshot: payment.receipt.receiptSnapshot,
+            }
+          : null,
+      };
+    }
+
+    // 2. Check Refund (PaymentRefund)
+    const refund = await this.prisma.paymentRefund.findUnique({
+      where: {
+        schoolId_idempotencyKey: {
+          schoolId,
+          idempotencyKey: trimmedKey,
+        },
+      },
+    });
+
+    if (refund) {
+      return {
+        found: true,
+        operationType: 'REFUND',
+        status: refund.status,
+        refund: {
+          id: refund.id,
+          paymentId: refund.paymentId,
+          refundAmount: Number(refund.refundAmount),
+          status: refund.status,
+          reason: refund.reason,
+          mode: refund.mode,
+          referenceNumber: refund.referenceNumber,
+          refundDate: refund.refundDate,
+        },
+      };
+    }
+
+    // 3. Check Reversal (PaymentReversal)
+    const reversal = await this.prisma.paymentReversal.findUnique({
+      where: {
+        schoolId_idempotencyKey: {
+          schoolId,
+          idempotencyKey: trimmedKey,
+        },
+      },
+    });
+
+    if (reversal) {
+      return {
+        found: true,
+        operationType: 'REVERSAL',
+        status: 'SUCCEEDED',
+        reversal: {
+          id: reversal.id,
+          paymentId: reversal.paymentId,
+          reversalNumber: reversal.reversalNumber,
+          reversalType: reversal.reversalType,
+          totalAmount: Number(reversal.totalAmount),
+          reason: reversal.reason,
+          createdAt: reversal.createdAt,
+        },
+      };
+    }
+
+    return {
+      found: false,
+    };
   }
 }

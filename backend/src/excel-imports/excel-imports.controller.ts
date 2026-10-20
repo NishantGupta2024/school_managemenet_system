@@ -23,7 +23,7 @@ import { UserRole } from '@prisma/client';
 import type { Response as ExpressResponse } from 'express';
 
 @Controller('excel-imports')
-@UseGuards(JwtAuthGuard, TenantGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
 @Roles(UserRole.PLATFORM_SUPER_ADMIN, UserRole.SCHOOL_ADMIN, UserRole.FEE_STAFF)
 export class ExcelImportsController {
   constructor(private readonly excelImportsService: ExcelImportsService) {}
@@ -49,6 +49,7 @@ export class ExcelImportsController {
   }
 
   @Post('preview')
+  @UseGuards(TenantGuard)
   @UseInterceptors(
     FileInterceptor('file', {
       limits: {
@@ -85,6 +86,7 @@ export class ExcelImportsController {
   }
 
   @Post('confirm')
+  @UseGuards(TenantGuard)
   async confirm(@Body() dto: ConfirmImportDto, @Request() req: any) {
     const schoolId = req.school.id;
     const userId = req.user.id;

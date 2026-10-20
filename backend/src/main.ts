@@ -19,7 +19,7 @@ async function bootstrap() {
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     credentials: true,
     allowedHeaders: ['Content-Type', 'Authorization', 'x-school-id'],
-    exposedHeaders: ['x-school-id'],
+    exposedHeaders: ['x-school-id', 'Content-Disposition'],
   });
 
   // Global Validation Pipe

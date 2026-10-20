@@ -1,9 +1,100 @@
 import { PrismaClient, TenantStatus, UserRole, UserStatus, StudentStatus } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
+import { URL } from 'url';
+
+export const DEFAULT_ALLOWED_SEED_DATABASES = [
+  'fee_dev',
+  'fee_staging',
+  'fee_uat',
+  'fee_uat_sandbox',
+  'fee_test',
+  'fee_iso_test',
+];
+
+export interface SeedTargetValidationOptions {
+  allowedDatabases?: string[];
+  allowUnsafeFeeDb?: boolean;
+}
+
+/**
+ * Fail-closed database target validation for seed operations.
+ * Validates actual connected database identity against safety rules before executing any write.
+ */
+export async function validateSeedTarget(
+  prismaClient: { $queryRaw: <T = any>(query: any, ...values: any[]) => Promise<T> },
+  envDatabaseUrl?: string,
+  options: SeedTargetValidationOptions = {},
+): Promise<string> {
+  const url = envDatabaseUrl || process.env.DATABASE_URL;
+  if (!url) {
+    throw new Error('Seed target validation failed: DATABASE_URL environment variable is missing.');
+  }
+
+  let parsedDbName: string | null = null;
+  try {
+    const parsed = new URL(url.replace(/^["']|["']$/g, ''));
+    parsedDbName = parsed.pathname.replace(/^\//, '').trim();
+  } catch {
+    throw new Error('Seed target validation failed: DATABASE_URL is not a valid database connection URL.');
+  }
+
+  if (!parsedDbName) {
+    throw new Error('Seed target validation failed: Could not determine database name from DATABASE_URL.');
+  }
+
+  const allowUnsafeFeeDb = options.allowUnsafeFeeDb || process.env.ALLOW_UNSAFE_FEE_DB === 'true';
+
+  if (parsedDbName.toLowerCase() === 'fee_db' && !allowUnsafeFeeDb) {
+    throw new Error("Seed target validation failed: Refusing to seed prohibited database 'fee_db'.");
+  }
+
+  // Query actual connected database identity via SQL
+  let activeDb: string;
+  try {
+    const result = await prismaClient.$queryRaw<Array<{ db: string }>>`SELECT current_database() as db`;
+    activeDb = result[0]?.db;
+  } catch (err: any) {
+    throw new Error(`Seed target validation failed: Unable to verify connected database identity: ${err.message || err}`);
+  }
+
+  if (!activeDb) {
+    throw new Error('Seed target validation failed: Database returned empty database identity.');
+  }
+
+  if (activeDb.toLowerCase() === 'fee_db' && !allowUnsafeFeeDb) {
+    throw new Error("Seed target validation failed: Connected database is prohibited database 'fee_db'. Execution halted.");
+  }
+
+  if (activeDb.toLowerCase() !== parsedDbName.toLowerCase()) {
+    throw new Error(
+      `Seed target validation failed: DATABASE_URL points to '${parsedDbName}', but connected database is '${activeDb}'. Mismatch rejected.`,
+    );
+  }
+
+  const allowed = options.allowedDatabases || DEFAULT_ALLOWED_SEED_DATABASES;
+  const isPatternAllowed = allowed.some((allowedTarget) => {
+    return activeDb.toLowerCase() === allowedTarget.toLowerCase() || activeDb.toLowerCase().startsWith(allowedTarget.toLowerCase());
+  });
+
+  const explicitEnvAllowed =
+    process.env.AUTHORIZED_SEED_DATABASE &&
+    process.env.AUTHORIZED_SEED_DATABASE.toLowerCase() === activeDb.toLowerCase();
+
+  if (!isPatternAllowed && !explicitEnvAllowed) {
+    throw new Error(
+      `Seed target validation failed: Database '${activeDb}' is not in the approved staging/test allowlist (${allowed.join(', ')}).`,
+    );
+  }
+
+  return activeDb;
+}
 
 const prisma = new PrismaClient();
 
 async function main() {
+  const verifiedDb = await validateSeedTarget(prisma);
+  console.log(`[SEED PREFLIGHT PASS] Verified authorized seed database: '${verifiedDb}'`);
+
   console.log('Seeding Phase 1 baseline multi-tenant foundation with real bcrypt credentials...');
 
   const passwordHash = await bcrypt.hash('Password123!', 10);
@@ -50,16 +141,15 @@ async function main() {
   console.log(`Seeded School B: ${schoolB.name} (${schoolB.code})`);
 
   // 3. Platform Super Admin (Cross-School / Global)
+  // Preserves existing privileged user credentials and roles if already present
   const existingPlatformAdmin = await prisma.user.findFirst({
     where: { email: 'superadmin@fee-platform.com' },
   });
 
   let platformAdmin;
   if (existingPlatformAdmin) {
-    platformAdmin = await prisma.user.update({
-      where: { id: existingPlatformAdmin.id },
-      data: { passwordHash, role: UserRole.PLATFORM_SUPER_ADMIN },
-    });
+    platformAdmin = existingPlatformAdmin;
+    console.log(`Preserved existing Platform Admin: ${platformAdmin.name}`);
   } else {
     platformAdmin = await prisma.user.create({
       data: {
@@ -71,10 +161,10 @@ async function main() {
         status: UserStatus.ACTIVE,
       },
     });
+    console.log(`Seeded Platform Admin: ${platformAdmin.name}`);
   }
-  console.log(`Seeded Platform Admin: ${platformAdmin.name}`);
 
-  // 4. School A Admin
+  // 4. School A Admin (Preserve credentials on re-seed)
   const adminA = await prisma.user.upsert({
     where: {
       schoolId_email: {
@@ -82,7 +172,7 @@ async function main() {
         email: 'admin@greenwood.edu',
       },
     },
-    update: { passwordHash, role: UserRole.SCHOOL_ADMIN },
+    update: {},
     create: {
       schoolId: schoolA.id,
       email: 'admin@greenwood.edu',
@@ -94,7 +184,7 @@ async function main() {
   });
   console.log(`Seeded School A Admin: ${adminA.name} [${adminA.role}]`);
 
-  // 5. School A Fee Staff
+  // 5. School A Fee Staff (Preserve credentials on re-seed)
   const staffA = await prisma.user.upsert({
     where: {
       schoolId_email: {
@@ -102,7 +192,7 @@ async function main() {
         email: 'staff@greenwood.edu',
       },
     },
-    update: { passwordHash, role: UserRole.FEE_STAFF },
+    update: {},
     create: {
       schoolId: schoolA.id,
       email: 'staff@greenwood.edu',
@@ -122,7 +212,7 @@ async function main() {
         email: 'student@greenwood.edu',
       },
     },
-    update: { passwordHash, role: UserRole.STUDENT },
+    update: {},
     create: {
       schoolId: schoolA.id,
       email: 'student@greenwood.edu',
@@ -134,7 +224,31 @@ async function main() {
   });
   console.log(`Seeded School A Student User: ${studentUserA.name} [${studentUserA.role}]`);
 
-  // 7. School B Admin
+  // 6b. School A Parent User
+  const parentUserA = await prisma.user.upsert({
+    where: {
+      schoolId_email: {
+        schoolId: schoolA.id,
+        email: 'parent@greenwood.edu',
+      },
+    },
+    update: {
+      passwordHash,
+      role: UserRole.PARENT,
+      status: UserStatus.ACTIVE,
+    },
+    create: {
+      schoolId: schoolA.id,
+      email: 'parent@greenwood.edu',
+      name: 'Vikram Sharma (Parent)',
+      passwordHash,
+      role: UserRole.PARENT,
+      status: UserStatus.ACTIVE,
+    },
+  });
+  console.log(`Seeded School A Parent User: ${parentUserA.name} [${parentUserA.role}]`);
+
+  // 7. School B Admin (Preserve credentials on re-seed)
   const adminB = await prisma.user.upsert({
     where: {
       schoolId_email: {
@@ -142,7 +256,7 @@ async function main() {
         email: 'admin@starlight.edu',
       },
     },
-    update: { passwordHash, role: UserRole.SCHOOL_ADMIN },
+    update: {},
     create: {
       schoolId: schoolB.id,
       email: 'admin@starlight.edu',
@@ -255,7 +369,7 @@ async function main() {
     },
   });
 
-  // 11. Student for School A
+  // 11. Student for School A (Linked to Student User A)
   const studentA = await prisma.student.upsert({
     where: {
       schoolId_admissionNumber: {
@@ -263,7 +377,9 @@ async function main() {
         admissionNumber: 'ADM-2026-001',
       },
     },
-    update: {},
+    update: {
+      userId: studentUserA.id,
+    },
     create: {
       schoolId: schoolA.id,
       admissionNumber: 'ADM-2026-001',
@@ -276,10 +392,34 @@ async function main() {
       gradeId: grade10A.id,
       sectionId: section10A.id,
       academicYearId: sessionA.id,
+      userId: studentUserA.id,
       status: StudentStatus.ACTIVE,
     },
   });
-  console.log(`Seeded Student A: ${studentA.firstName} ${studentA.lastName} (${studentA.admissionNumber})`);
+  console.log(`Seeded Student A: ${studentA.firstName} ${studentA.lastName} (${studentA.admissionNumber}) -> Linked to userId: ${studentUserA.id}`);
+
+  // 11b. Parent-Student Relationship for School A
+  const parentRelA = await prisma.parentStudentRelation.upsert({
+    where: {
+      schoolId_parentId_studentId: {
+        schoolId: schoolA.id,
+        parentId: parentUserA.id,
+        studentId: studentA.id,
+      },
+    },
+    update: {
+      relationshipType: 'FATHER',
+      isVerified: true,
+    },
+    create: {
+      schoolId: schoolA.id,
+      parentId: parentUserA.id,
+      studentId: studentA.id,
+      relationshipType: 'FATHER',
+      isVerified: true,
+    },
+  });
+  console.log(`Seeded Parent-Student Relation: ${parentUserA.name} -> ${studentA.firstName} [Verified: ${parentRelA.isVerified}]`);
 
   // 12. Student for School B
   const studentB = await prisma.student.upsert({
@@ -310,11 +450,13 @@ async function main() {
   console.log('Seed completed with real bcrypt credentials.');
 }
 
-main()
-  .catch((e) => {
-    console.error('Seed error:', e);
-    process.exit(1);
-  })
-  .finally(async () => {
-    await prisma.$disconnect();
-  });
+if (require.main === module) {
+  main()
+    .catch((e) => {
+      console.error('Seed error:', e);
+      process.exit(1);
+    })
+    .finally(async () => {
+      await prisma.$disconnect();
+    });
+}

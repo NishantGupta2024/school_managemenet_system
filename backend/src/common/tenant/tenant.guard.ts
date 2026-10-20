@@ -6,16 +6,12 @@ import {
   ForbiddenException,
   BadRequestException,
 } from '@nestjs/common';
-import { TenantContextService } from './tenant-context.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { UserRole } from '@prisma/client';
 
 @Injectable()
 export class TenantGuard implements CanActivate {
-  constructor(
-    private readonly tenantContextService: TenantContextService,
-    private readonly prisma: PrismaService,
-  ) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest();
@@ -78,16 +74,8 @@ export class TenantGuard implements CanActivate {
       throw new ForbiddenException(`School tenant is currently ${school.status}`);
     }
 
-    // Attach validated school entity to request object and update tenant context
+    // Attach validated school entity to request object
     request.school = school;
-    this.tenantContextService.run(
-      {
-        schoolId: targetSchoolId,
-        userId: user.id,
-        userRole: user.role,
-      },
-      () => {},
-    );
 
     return true;
   }

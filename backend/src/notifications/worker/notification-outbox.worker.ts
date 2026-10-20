@@ -3,6 +3,7 @@ import {
   Logger,
   OnApplicationBootstrap,
   OnApplicationShutdown,
+  Optional,
 } from '@nestjs/common';
 import {
   NotificationEventType,
@@ -20,7 +21,11 @@ import {
 } from '../email/email.types';
 import { normalizeEmailError } from '../email/memory-email.provider';
 import { EmailTemplateRenderer } from '../templates/email-template.renderer';
+import { RenderedEmail } from '../templates/template.types';
 import { sanitizeSenderDisplayName } from '../templates/template-sanitizer';
+import { WhatsAppProvider } from '../whatsapp/whatsapp-provider.interface';
+import { normalizeWhatsAppError } from '../whatsapp/memory-whatsapp.provider';
+import { normalizeWhatsAppPhoneNumber } from '../whatsapp/whatsapp-cloud-api.provider';
 
 export interface WorkerBatchResult {
   claimedCount: number;
@@ -51,8 +56,9 @@ export class NotificationOutboxWorker
     private readonly emailProvider: EmailProvider,
     private readonly emailConfigService: EmailConfigService,
     private readonly templateRenderer: EmailTemplateRenderer,
+    @Optional() private readonly whatsappProvider?: WhatsAppProvider,
   ) {
-    this.isEnabled = process.env.NOTIFICATION_WORKER_ENABLED !== 'false';
+    this.isEnabled = process.env.NOTIFICATION_WORKER_ENABLED === 'true';
     this.batchSize = Math.max(
       1,
       Math.min(100, parseInt(process.env.NOTIFICATION_WORKER_BATCH_SIZE || '10', 10)),
@@ -273,12 +279,49 @@ export class NotificationOutboxWorker
 
   /**
    * Processes a single claimed outbox record outside database transactions.
-   * Verifies lease ownership before committing outcome to prevent stale overwrites.
+   * Routes by channel (EMAIL vs WHATSAPP) and verifies lease ownership before committing outcome.
    */
   async processSingleRecord(record: NotificationOutbox): Promise<NotificationStatus> {
     const claimedLockedAt = record.lockedAt || new Date();
     const startedAt = new Date();
 
+    const rawChannel = String((record as any).channel || 'EMAIL').trim().toUpperCase();
+
+    if (rawChannel === 'EMAIL') {
+      return await this.processEmailRecord(record, claimedLockedAt, startedAt);
+    } else if (rawChannel === 'WHATSAPP') {
+      return await this.processWhatsAppRecord(record, claimedLockedAt, startedAt);
+    } else {
+      this.logger.warn(`Unsupported notification channel '${rawChannel}' for outbox record ${record.id}`);
+      await this.finalizeRecord(
+        record.id,
+        claimedLockedAt,
+        NotificationStatus.SKIPPED,
+        {
+          skipReason: `UNSUPPORTED_NOTIFICATION_CHANNEL:${rawChannel}`,
+          skippedAt: new Date(),
+        },
+        {
+          attemptNumber: record.attemptCount,
+          startedAt,
+          completedAt: new Date(),
+          outcome: NotificationStatus.SKIPPED,
+          errorMessage: `Unsupported notification channel '${rawChannel}'`,
+          retryScheduled: false,
+        },
+      );
+      return NotificationStatus.SKIPPED;
+    }
+  }
+
+  /**
+   * Handles EMAIL channel dispatch.
+   */
+  private async processEmailRecord(
+    record: NotificationOutbox,
+    claimedLockedAt: Date,
+    startedAt: Date,
+  ): Promise<NotificationStatus> {
     // 1. Check for missing recipient email
     if (!record.recipientEmail || record.recipientEmail.trim() === '') {
       await this.finalizeRecord(
@@ -344,7 +387,7 @@ export class NotificationOutboxWorker
     }
 
     // 3. Render template
-    let rendered;
+    let rendered: RenderedEmail;
     try {
       rendered = this.templateRenderer.render(
         record.templateKey as NotificationEventType,
@@ -445,8 +488,8 @@ export class NotificationOutboxWorker
         fromName: senderName,
         replyTo,
         subject: rendered.subject,
-        htmlBody: rendered.htmlBody,
-        textBody: rendered.textBody,
+        htmlBody: rendered.htmlBody ?? rendered.html,
+        textBody: rendered.textBody ?? rendered.text,
         idempotencyKey: record.idempotencyKey,
         metadata: {
           outboxId: record.id,
@@ -503,6 +546,240 @@ export class NotificationOutboxWorker
       `Provider accepted outbox record ${record.id} for ${this.maskEmail(record.recipientEmail)} (msgId: ${
         sendResult.providerMessageId
       })`,
+    );
+
+    await this.finalizeRecord(
+      record.id,
+      currentLockedAt,
+      NotificationStatus.SENT,
+      {
+        providerMessageId: sendResult.providerMessageId,
+        sentAt: completedAt,
+      },
+      {
+        attemptNumber: record.attemptCount,
+        startedAt,
+        completedAt,
+        outcome: NotificationStatus.SENT,
+        providerMessageId: sendResult.providerMessageId,
+        retryScheduled: false,
+      },
+    );
+
+    return NotificationStatus.SENT;
+  }
+
+  /**
+   * Handles WHATSAPP channel dispatch.
+   */
+  private async processWhatsAppRecord(
+    record: NotificationOutbox,
+    claimedLockedAt: Date,
+    startedAt: Date,
+  ): Promise<NotificationStatus> {
+    // 1. Resolve recipient phone number
+    const recipientPhone =
+      (record as any).recipientPhone?.trim() ||
+      (record.templateData as any)?.recipientPhone?.trim() ||
+      (record.templateData as any)?.guardianPhone?.trim();
+
+    if (!recipientPhone) {
+      await this.finalizeRecord(
+        record.id,
+        claimedLockedAt,
+        NotificationStatus.SKIPPED,
+        {
+          skipReason: 'NO_VALID_RECIPIENT_PHONE',
+          skippedAt: new Date(),
+        },
+        {
+          attemptNumber: record.attemptCount,
+          startedAt,
+          completedAt: new Date(),
+          outcome: NotificationStatus.SKIPPED,
+          errorMessage: 'No valid recipient phone number on record',
+          retryScheduled: false,
+        },
+      );
+      return NotificationStatus.SKIPPED;
+    }
+
+    // 2. Validate WhatsAppProvider presence
+    if (!this.whatsappProvider) {
+      const errorMsg = 'WhatsApp provider is not injected or configured in outbox worker';
+      this.logger.error(`Failed to process WhatsApp record ${record.id}: ${errorMsg}`);
+      await this.finalizeRecord(
+        record.id,
+        claimedLockedAt,
+        NotificationStatus.FAILED,
+        {
+          lastErrorCode: 'WHATSAPP_PROVIDER_UNAVAILABLE',
+          lastErrorMessage: errorMsg,
+        },
+        {
+          attemptNumber: record.attemptCount,
+          startedAt,
+          completedAt: new Date(),
+          outcome: NotificationStatus.FAILED,
+          errorCode: 'WHATSAPP_PROVIDER_UNAVAILABLE',
+          errorMessage: errorMsg,
+          retryScheduled: false,
+        },
+      );
+      return NotificationStatus.FAILED;
+    }
+
+    // 3. Production delivery check
+    const isProduction = process.env.NODE_ENV === 'production';
+    if (isProduction && !this.whatsappProvider.isDeliveryProvider()) {
+      const errorMsg = 'Cannot deliver WhatsApp message: Configured WhatsApp provider is non-delivering in production.';
+      await this.finalizeRecord(
+        record.id,
+        claimedLockedAt,
+        NotificationStatus.FAILED,
+        {
+          lastErrorCode: 'NON_DELIVERING_PROVIDER_IN_PRODUCTION',
+          lastErrorMessage: errorMsg,
+        },
+        {
+          attemptNumber: record.attemptCount,
+          startedAt,
+          completedAt: new Date(),
+          outcome: NotificationStatus.FAILED,
+          errorCode: 'NON_DELIVERING_PROVIDER_IN_PRODUCTION',
+          errorMessage: errorMsg,
+          retryScheduled: false,
+        },
+      );
+      return NotificationStatus.FAILED;
+    }
+
+    // 4. Verify tenant WhatsApp preference from school notification settings (fail closed)
+    let isWhatsAppEnabled = false;
+    try {
+      const setting = await this.prisma.schoolNotificationSetting.findUnique({
+        where: { schoolId: record.schoolId },
+      });
+      if (setting && (setting as any).whatsappEnabled === true) {
+        isWhatsAppEnabled = true;
+      }
+    } catch (err: any) {
+      this.logger.warn(`Could not verify WhatsApp settings for school ${record.schoolId}: ${err.message}`);
+    }
+
+    if (!isWhatsAppEnabled) {
+      const errorMsg =
+        'WhatsApp dispatch rejected: School has not enabled WhatsApp notifications or schema lacks verified tenant setting.';
+      this.logger.warn(`WhatsApp dispatch blocked for record ${record.id}: ${errorMsg}`);
+      await this.finalizeRecord(
+        record.id,
+        claimedLockedAt,
+        NotificationStatus.FAILED,
+        {
+          lastErrorCode: 'WHATSAPP_TENANT_PREFERENCE_UNVERIFIED',
+          lastErrorMessage: errorMsg,
+        },
+        {
+          attemptNumber: record.attemptCount,
+          startedAt,
+          completedAt: new Date(),
+          outcome: NotificationStatus.FAILED,
+          errorCode: 'WHATSAPP_TENANT_PREFERENCE_UNVERIFIED',
+          errorMessage: errorMsg,
+          retryScheduled: false,
+        },
+      );
+      return NotificationStatus.FAILED;
+    }
+
+    // 5. Setup lease renewal heartbeat for slow dispatches
+    let currentLockedAt = claimedLockedAt;
+    let leaseLost = false;
+    const heartbeatIntervalMs = Math.max(5000, Math.floor(this.lockDurationMs / 3));
+
+    const heartbeatTimer = setInterval(async () => {
+      if (leaseLost || this.isStopping) return;
+      try {
+        const renewedAt = new Date();
+        const updateResult = await this.prisma.notificationOutbox.updateMany({
+          where: {
+            id: record.id,
+            status: NotificationStatus.PROCESSING,
+            lockedAt: currentLockedAt,
+          },
+          data: {
+            lockedAt: renewedAt,
+            updatedAt: renewedAt,
+          },
+        });
+        if (updateResult.count > 0) {
+          currentLockedAt = renewedAt;
+        } else {
+          leaseLost = true;
+          this.logger.warn(`[Lease Heartbeat] Lost lease ownership for WhatsApp record ${record.id}`);
+        }
+      } catch (heartbeatErr: any) {
+        this.logger.warn(`[Lease Heartbeat] Error renewing lease for WhatsApp record ${record.id}: ${heartbeatErr.message}`);
+      }
+    }, heartbeatIntervalMs);
+
+    let sendResult: any;
+    try {
+      const templateName =
+        (record.templateData as any)?.whatsappTemplateName ||
+        record.templateKey.toLowerCase().replace(/[^a-z0-9_]/g, '_');
+
+      sendResult = await this.whatsappProvider.sendWhatsAppMessage({
+        toPhone: recipientPhone,
+        recipientName: record.recipientName || undefined,
+        templateName,
+        languageCode: (record.templateData as any)?.languageCode || 'en',
+        parameters: (record.templateData as any)?.whatsappParameters || record.templateData,
+        idempotencyKey: record.idempotencyKey,
+        metadata: {
+          outboxId: record.id,
+          schoolId: record.schoolId,
+          channel: 'WHATSAPP',
+          idempotencyKey: record.idempotencyKey,
+        },
+      });
+    } catch (err: any) {
+      clearInterval(heartbeatTimer);
+      const providerError = normalizeWhatsAppError(err);
+      const completedAt = new Date();
+      const retryPolicy = this.calculateNextAttempt(record.attemptCount, providerError as any);
+
+      this.logger.warn(
+        `WhatsApp delivery failure for record ${record.id} to ${this.maskPhone(recipientPhone)} (attempt ${record.attemptCount}/${this.maxAttempts}): [${providerError.code}] ${providerError.message}`,
+      );
+
+      await this.finalizeRecord(
+        record.id,
+        currentLockedAt,
+        NotificationStatus.FAILED,
+        {
+          lastErrorCode: providerError.code,
+          lastErrorMessage: providerError.message,
+          nextAttemptAt: retryPolicy.nextAttemptAt,
+        },
+        {
+          attemptNumber: record.attemptCount,
+          startedAt,
+          completedAt,
+          outcome: NotificationStatus.FAILED,
+          errorCode: providerError.code,
+          errorMessage: providerError.message,
+          retryScheduled: retryPolicy.retryScheduled,
+        },
+      );
+      return NotificationStatus.FAILED;
+    } finally {
+      clearInterval(heartbeatTimer);
+    }
+
+    const completedAt = new Date();
+    this.logger.log(
+      `WhatsApp provider accepted outbox record ${record.id} for ${this.maskPhone(recipientPhone)} (msgId: ${sendResult.providerMessageId})`,
     );
 
     await this.finalizeRecord(
@@ -676,5 +953,15 @@ export class NotificationOutboxWorker
         ? `${user[0]}***${user[user.length - 1]}`
         : `${user[0]}***`;
     return `${maskedUser}@${domain}`;
+  }
+
+  /**
+   * Sanitizes phone numbers for logging without exposing recipient PII.
+   */
+  private maskPhone(phone?: string | null): string {
+    if (!phone) return 'N/A';
+    const clean = phone.replace(/[\s\-\(\)\+]/g, '');
+    if (clean.length < 4) return '[REDACTED]';
+    return `+${clean.slice(0, 2)}••••${clean.slice(-4)}`;
   }
 }

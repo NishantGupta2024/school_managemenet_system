@@ -214,6 +214,114 @@ vi.mock('./services/api', () => ({
     delete: vi.fn(),
     preview: vi.fn(),
   },
+  reportsApi: {
+    getDailyCollection: vi.fn().mockResolvedValue({
+      school: { id: 's1', name: 'Greenwood Intl Academy', currency: 'INR', timezone: 'Asia/Kolkata' },
+      period: { date: '2026-10-17' },
+      summary: {
+        grossCollections: 15000,
+        totalReversals: 2000,
+        totalRefunds: 1000,
+        netCollections: 12000,
+        transactionCount: 2,
+      },
+      transactions: [],
+      byPaymentMethod: [],
+      byFeeHead: [],
+    }),
+    getMonthlyCollection: vi.fn().mockResolvedValue({
+      school: { id: 's1', name: 'Greenwood Intl Academy', currency: 'INR', timezone: 'Asia/Kolkata' },
+      period: { year: 2026, month: 10 },
+      summary: { grossCollections: 0, totalReversals: 0, totalRefunds: 0, netCollections: 0, transactionCount: 0 },
+      dailyBreakdown: [],
+      byPaymentMethod: [],
+      byFeeHead: [],
+    }),
+    getCollectionSummary: vi.fn().mockResolvedValue({
+      school: { id: 's1', name: 'Greenwood Intl Academy', currency: 'INR', timezone: 'Asia/Kolkata' },
+      period: { startDate: '2026-10-01', endDate: '2026-10-17' },
+      summary: { grossCollections: 0, totalReversals: 0, totalRefunds: 0, netCollections: 0, transactionCount: 0 },
+      periodicBreakdown: [],
+      byPaymentMethod: [],
+      byFeeHead: [],
+    }),
+    getOutstandingDues: vi.fn().mockResolvedValue({
+      school: { id: 's1', name: 'Greenwood Intl Academy', currency: 'INR', timezone: 'Asia/Kolkata' },
+      filters: {},
+      pagination: { page: 1, limit: 20, totalRecords: 0, totalPages: 1, hasNextPage: false, hasPrevPage: false },
+      summary: {
+        totalStudents: 0,
+        totalBilledAmount: 0,
+        totalPaidAmount: 0,
+        totalPaidPrincipal: 0,
+        totalPaidFines: 0,
+        totalRemainingPrincipal: 0,
+        totalFineBalance: 0,
+        totalOutstandingAmount: 0,
+        totalOverduePrincipal: 0,
+        totalOverdueFines: 0,
+        totalOverdueAmount: 0,
+        overdueStudentsCount: 0,
+      },
+      records: [],
+    }),
+    getDefaultersReport: vi.fn().mockResolvedValue({
+      school: { id: 's1', name: 'Greenwood Intl Academy', currency: 'INR', timezone: 'Asia/Kolkata' },
+      filters: {},
+      pagination: { page: 1, limit: 20, totalRecords: 0, totalPages: 1, hasNextPage: false, hasPrevPage: false },
+      summary: {
+        totalStudents: 0,
+        totalBilledAmount: 0,
+        totalPaidAmount: 0,
+        totalPaidPrincipal: 0,
+        totalPaidFines: 0,
+        totalRemainingPrincipal: 0,
+        totalFineBalance: 0,
+        totalOutstandingAmount: 0,
+        totalOverduePrincipal: 0,
+        totalOverdueFines: 0,
+        totalOverdueAmount: 0,
+        overdueStudentsCount: 0,
+      },
+      records: [],
+    }),
+    getClassCollections: vi.fn().mockResolvedValue({
+      school: { id: 's1', name: 'Greenwood Intl Academy', currency: 'INR', timezone: 'Asia/Kolkata' },
+      period: { startDate: '2026-10-01', endDate: '2026-10-17' },
+      filters: {},
+      summary: { grossCollections: 0, totalReversals: 0, totalRefunds: 0, netCollections: 0, transactionCount: 0 },
+      byClass: [],
+    }),
+    getFineSummary: vi.fn().mockResolvedValue({
+      school: { id: 's1', name: 'Greenwood Intl Academy', currency: 'INR', timezone: 'Asia/Kolkata' },
+      filters: {},
+      summary: {
+        totalAssessed: 0,
+        totalWaived: 0,
+        netObligation: 0,
+        totalCollected: 0,
+        totalReversals: 0,
+        totalRefunds: 0,
+        netCollected: 0,
+        remainingBalance: 0,
+        fineCount: 0,
+      },
+      byClass: [],
+    }),
+    exportReport: vi.fn().mockResolvedValue('daily_collection_2026-10-17.csv'),
+  },
+  paymentsApi: {
+    collect: vi.fn(),
+    list: vi.fn().mockResolvedValue({
+      data: [],
+      meta: { page: 1, limit: 15, total: 0, totalPages: 1 },
+    }),
+    getById: vi.fn(),
+    getReceiptByNumber: vi.fn(),
+    reverse: vi.fn(),
+    refund: vi.fn(),
+    getRefunds: vi.fn().mockResolvedValue([]),
+  },
 }));
 
 describe('App Component', () => {
@@ -331,6 +439,32 @@ describe('App Component', () => {
       expect(screen.getByText(/Fine Configuration & Late Fee Rules/i)).toBeInTheDocument();
       expect(screen.getByText(/Standard Late Fee/i)).toBeInTheDocument();
       expect(screen.getByText(/Late Fine Calculation Preview & Simulator/i)).toBeInTheDocument();
+    });
+  });
+
+  it('navigates to Fee Reports tab when clicked', async () => {
+    render(<App />);
+    await screen.findByText(/Phase Foundation & Fee Engine Deliverables/i);
+    const tabBtns = screen.getAllByRole('button', { name: /Fee Reports/i });
+    fireEvent.click(tabBtns[0]);
+
+    await waitFor(() => {
+      expect(screen.getByText(/Fee Reporting & Financial Analytics/i)).toBeInTheDocument();
+      expect(screen.getByRole('tab', { name: /Daily Collection/i })).toBeInTheDocument();
+      expect(screen.getByRole('tab', { name: /Outstanding Dues/i })).toBeInTheDocument();
+      expect(screen.getByRole('tab', { name: /Defaulter Report/i })).toBeInTheDocument();
+    });
+  });
+
+  it('navigates to Payments & Receipts tab when clicked', async () => {
+    render(<App />);
+    await screen.findByText(/Phase Foundation & Fee Engine Deliverables/i);
+    const tabBtns = screen.getAllByRole('button', { name: /Payments & Receipts/i });
+    fireEvent.click(tabBtns[0]);
+
+    await waitFor(() => {
+      expect(screen.getByText(/Fee Payments & Official Receipts/i)).toBeInTheDocument();
+      expect(screen.getByText(/Counter Fee Collection/i)).toBeInTheDocument();
     });
   });
 });

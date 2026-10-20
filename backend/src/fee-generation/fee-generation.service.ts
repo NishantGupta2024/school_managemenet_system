@@ -871,6 +871,26 @@ export class FeeGenerationService {
             },
             orderBy: { createdAt: 'asc' },
           },
+          paymentAllocations: {
+            include: {
+              refundAllocations: {
+                include: { paymentRefund: true },
+              },
+            },
+          },
+          assessedFines: {
+            include: {
+              allocations: {
+                include: {
+                  refundAllocations: {
+                    include: { paymentRefund: true },
+                  },
+                },
+              },
+              waivers: true,
+            },
+            orderBy: { createdAt: 'asc' },
+          },
         },
         orderBy: { billingMonth: 'asc' },
       }),
@@ -894,6 +914,11 @@ export class FeeGenerationService {
     let totalGross = new Prisma.Decimal(0);
     let totalDiscount = new Prisma.Decimal(0);
     let totalNet = new Prisma.Decimal(0);
+    let totalGrossAssessedFine = new Prisma.Decimal(0);
+    let totalWaivedFine = new Prisma.Decimal(0);
+    let totalAssessedFine = new Prisma.Decimal(0);
+    let totalPaid = new Prisma.Decimal(0);
+    let totalRemaining = new Prisma.Decimal(0);
     let totalFinePreview = new Prisma.Decimal(0);
     const statusBreakdown: Record<string, number> = {
       UPCOMING: 0,
@@ -905,6 +930,127 @@ export class FeeGenerationService {
     };
 
     const formattedInvoices = invoices.map((inv) => {
+      const isVoid = inv.status === InvoiceStatus.VOID;
+
+      // 1. Calculate net paid principal taking into account only allocations on items
+      let invoicePaidPrincipal = new Prisma.Decimal(0);
+      const itemPaidMap = new Map<string, Prisma.Decimal>();
+
+      for (const alloc of (inv as any).paymentAllocations || []) {
+        if (alloc.invoiceItemId) {
+          if (alloc.allocationType === 'PRINCIPAL') {
+            let netAlloc = new Prisma.Decimal(alloc.allocatedAmount);
+            if (alloc.refundAllocations) {
+              for (const ra of alloc.refundAllocations) {
+                if (ra.paymentRefund?.status === 'SUCCEEDED') {
+                  netAlloc = netAlloc.sub(ra.amount);
+                }
+              }
+            }
+            netAlloc = Prisma.Decimal.max(new Prisma.Decimal(0), netAlloc);
+            invoicePaidPrincipal = invoicePaidPrincipal.add(netAlloc);
+            const currentItemPaid = itemPaidMap.get(alloc.invoiceItemId) || new Prisma.Decimal(0);
+            itemPaidMap.set(alloc.invoiceItemId, currentItemPaid.add(netAlloc));
+          } else if (alloc.allocationType === 'REVERSAL') {
+            invoicePaidPrincipal = invoicePaidPrincipal.sub(alloc.allocatedAmount);
+            const currentItemPaid = itemPaidMap.get(alloc.invoiceItemId) || new Prisma.Decimal(0);
+            itemPaidMap.set(alloc.invoiceItemId, currentItemPaid.sub(alloc.allocatedAmount));
+          }
+        }
+      }
+      invoicePaidPrincipal = Prisma.Decimal.max(new Prisma.Decimal(0), invoicePaidPrincipal);
+      const invoiceNet = new Prisma.Decimal(inv.netAmount);
+      const invoiceRemainingPrincipal = isVoid
+        ? new Prisma.Decimal(0)
+        : Prisma.Decimal.max(new Prisma.Decimal(0), invoiceNet.sub(invoicePaidPrincipal));
+
+      // 2. Calculate assessed fines, payments, waivers, and balances (F-01 / Finding 3)
+      let invGrossAssessedFines = new Prisma.Decimal(0);
+      let invWaivedFines = new Prisma.Decimal(0);
+      let invAssessedFines = new Prisma.Decimal(0);
+      let invPaidFines = new Prisma.Decimal(0);
+      let invRemainingFines = new Prisma.Decimal(0);
+
+      for (const fine of (inv as any).assessedFines || []) {
+        let finePaid = new Prisma.Decimal(0);
+        for (const fa of fine.allocations || []) {
+          if (fa.allocationType === 'FINE') {
+            let netFineAlloc = new Prisma.Decimal(fa.allocatedAmount);
+            if (fa.refundAllocations) {
+              for (const ra of fa.refundAllocations) {
+                if (ra.paymentRefund?.status === 'SUCCEEDED') {
+                  netFineAlloc = netFineAlloc.sub(ra.amount);
+                }
+              }
+            }
+            netFineAlloc = Prisma.Decimal.max(new Prisma.Decimal(0), netFineAlloc);
+            finePaid = finePaid.add(netFineAlloc);
+          } else if (fa.allocationType === 'REVERSAL') {
+            finePaid = finePaid.sub(fa.allocatedAmount);
+          }
+        }
+        finePaid = Prisma.Decimal.max(new Prisma.Decimal(0), finePaid);
+        invPaidFines = invPaidFines.add(finePaid);
+
+        let fineWaived = new Prisma.Decimal(0);
+        for (const w of fine.waivers || []) {
+          fineWaived = fineWaived.add(w.waivedAmount);
+        }
+
+        const fineAssessed = new Prisma.Decimal(fine.assessedAmount);
+        const fineNetAssessed = Prisma.Decimal.max(
+          new Prisma.Decimal(0),
+          fineAssessed.sub(fineWaived),
+        );
+        const fineRemaining = Prisma.Decimal.max(
+          new Prisma.Decimal(0),
+          fineNetAssessed.sub(finePaid),
+        );
+
+        invGrossAssessedFines = invGrossAssessedFines.add(fineAssessed);
+        invWaivedFines = invWaivedFines.add(fineWaived);
+        invAssessedFines = invAssessedFines.add(fineNetAssessed);
+        invRemainingFines = invRemainingFines.add(fineRemaining);
+      }
+
+      if (isVoid) {
+        invAssessedFines = new Prisma.Decimal(0);
+        invRemainingFines = new Prisma.Decimal(0);
+      }
+
+      const invoicePaid = invoicePaidPrincipal.add(invPaidFines);
+      const invoiceRemaining = isVoid
+        ? new Prisma.Decimal(0)
+        : invoiceRemainingPrincipal.add(invRemainingFines);
+
+      // 3. Status Derivation aligned with payments.service.ts (including zero-net/100%-discount invoices)
+      let derivedStatus: InvoiceStatus;
+      if (isVoid) {
+        derivedStatus = InvoiceStatus.VOID;
+      } else if (invoiceRemaining.equals(0)) {
+        derivedStatus = InvoiceStatus.PAID;
+      } else if (invoicePaid.greaterThan(0) && invoiceRemaining.greaterThan(0)) {
+        derivedStatus = InvoiceStatus.PARTIALLY_PAID;
+      } else {
+        const matchedRule = this.fineRulesService
+          ? this.fineRulesService.selectBestMatchingRuleForInvoice(
+              inv,
+              activeFineRules,
+              now,
+              timezone,
+            )
+          : null;
+        const graceDays = matchedRule ? matchedRule.gracePeriodDays : 5;
+        derivedStatus = this.deriveCurrentInvoiceStatus(
+          inv.status,
+          inv.dueDate,
+          now,
+          graceDays,
+        );
+      }
+      statusBreakdown[derivedStatus] = (statusBreakdown[derivedStatus] || 0) + 1;
+
+      // 4. Fine preview calculation (only for non-void, non-paid invoices)
       const matchedRule = this.fineRulesService
         ? this.fineRulesService.selectBestMatchingRuleForInvoice(
             inv,
@@ -913,15 +1059,6 @@ export class FeeGenerationService {
             timezone,
           )
         : null;
-
-      const graceDays = matchedRule ? matchedRule.gracePeriodDays : 5;
-      const derivedStatus = this.deriveCurrentInvoiceStatus(
-        inv.status,
-        inv.dueDate,
-        now,
-        graceDays,
-      );
-      statusBreakdown[derivedStatus] = (statusBreakdown[derivedStatus] || 0) + 1;
 
       const fineBreakdown =
         this.fineRulesService &&
@@ -935,13 +1072,21 @@ export class FeeGenerationService {
             })
           : null;
 
-      totalGross = totalGross.add(inv.grossAmount);
-      totalDiscount = totalDiscount.add(inv.discountAmount);
-      totalNet = totalNet.add(inv.netAmount);
-      if (fineBreakdown) {
-        totalFinePreview = totalFinePreview.add(
-          new Prisma.Decimal(fineBreakdown.calculatedFine),
-        );
+      // 5. Aggregate totals (F-05 & Finding 3: VOID invoices excluded from principal, fine, paid, and remaining totals)
+      if (!isVoid) {
+        totalGross = totalGross.add(inv.grossAmount);
+        totalDiscount = totalDiscount.add(inv.discountAmount);
+        totalNet = totalNet.add(inv.netAmount);
+        totalGrossAssessedFine = totalGrossAssessedFine.add(invGrossAssessedFines);
+        totalWaivedFine = totalWaivedFine.add(invWaivedFines);
+        totalAssessedFine = totalAssessedFine.add(invAssessedFines);
+        totalPaid = totalPaid.add(invoicePaid);
+        totalRemaining = totalRemaining.add(invoiceRemaining);
+        if (fineBreakdown) {
+          totalFinePreview = totalFinePreview.add(
+            new Prisma.Decimal(fineBreakdown.calculatedFine),
+          );
+        }
       }
 
       return {
@@ -955,6 +1100,15 @@ export class FeeGenerationService {
         grossAmount: Number(inv.grossAmount),
         discountAmount: Number(inv.discountAmount),
         netAmount: Number(inv.netAmount),
+        grossAssessedFineAmount: invGrossAssessedFines.toDecimalPlaces(2).toNumber(),
+        waivedFineAmount: invWaivedFines.toDecimalPlaces(2).toNumber(),
+        assessedFineAmount: invAssessedFines.toDecimalPlaces(2).toNumber(),
+        paidAmount: invoicePaid.toDecimalPlaces(2).toNumber(),
+        remainingBalance: invoiceRemaining.toDecimalPlaces(2).toNumber(),
+        paidPrincipal: invoicePaidPrincipal.toDecimalPlaces(2).toNumber(),
+        remainingPrincipal: invoiceRemainingPrincipal.toDecimalPlaces(2).toNumber(),
+        paidFines: invPaidFines.toDecimalPlaces(2).toNumber(),
+        remainingFines: invRemainingFines.toDecimalPlaces(2).toNumber(),
         status: derivedStatus,
         storedStatus: inv.status,
         generatedAt: inv.generatedAt,
@@ -970,16 +1124,25 @@ export class FeeGenerationService {
               isPaymentOrCollected: false,
             }
           : null,
-        items: inv.items.map((item) => ({
-          id: item.id,
-          feeHeadId: item.feeHeadId,
-          feeHeadNameSnapshot: item.feeHeadNameSnapshot,
-          billingFrequencySnapshot: item.billingFrequencySnapshot,
-          grossAmount: Number(item.grossAmount),
-          discountAmount: Number(item.discountAmount),
-          netAmount: Number(item.netAmount),
-          createdAt: item.createdAt,
-        })),
+        items: inv.items.map((item) => {
+          const itemNet = new Prisma.Decimal(item.netAmount);
+          const itemPaid = Prisma.Decimal.max(new Prisma.Decimal(0), itemPaidMap.get(item.id) || new Prisma.Decimal(0));
+          const itemRemaining = isVoid
+            ? new Prisma.Decimal(0)
+            : Prisma.Decimal.max(new Prisma.Decimal(0), itemNet.sub(itemPaid));
+          return {
+            id: item.id,
+            feeHeadId: item.feeHeadId,
+            feeHeadNameSnapshot: item.feeHeadNameSnapshot,
+            billingFrequencySnapshot: item.billingFrequencySnapshot,
+            grossAmount: Number(item.grossAmount),
+            discountAmount: Number(item.discountAmount),
+            netAmount: Number(item.netAmount),
+            paidAmount: itemPaid.toDecimalPlaces(2).toNumber(),
+            remainingBalance: itemRemaining.toDecimalPlaces(2).toNumber(),
+            createdAt: item.createdAt,
+          };
+        }),
       };
     });
 
@@ -1019,6 +1182,11 @@ export class FeeGenerationService {
         totalGrossAmount: totalGross.toDecimalPlaces(2).toNumber(),
         totalDiscountAmount: totalDiscount.toDecimalPlaces(2).toNumber(),
         totalNetAmount: totalNet.toDecimalPlaces(2).toNumber(),
+        totalGrossAssessedFineAmount: totalGrossAssessedFine.toDecimalPlaces(2).toNumber(),
+        totalWaivedFineAmount: totalWaivedFine.toDecimalPlaces(2).toNumber(),
+        totalAssessedFineAmount: totalAssessedFine.toDecimalPlaces(2).toNumber(),
+        totalPaidAmount: totalPaid.toDecimalPlaces(2).toNumber(),
+        totalRemainingAmount: totalRemaining.toDecimalPlaces(2).toNumber(),
         totalCalculatedFinePreview: totalFinePreview.toDecimalPlaces(2).toNumber(),
         invoiceCount: formattedInvoices.length,
         statusBreakdown,

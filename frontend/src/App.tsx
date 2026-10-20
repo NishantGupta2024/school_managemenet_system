@@ -15,6 +15,8 @@ import { FeeGenerationView } from './components/FeeGenerationView';
 import { StudentStatementView } from './components/StudentStatementView';
 import { ExcelImportView } from './components/ExcelImportView';
 import { FineConfigurationView } from './components/FineConfigurationView';
+import { FeeReportsView } from './components/FeeReportsView';
+import { PaymentsView } from './components/PaymentsView';
 import { LoginView } from './components/LoginView';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { AuthProvider, useAuth, useOptionalAuth } from './context/AuthContext';
@@ -33,6 +35,8 @@ import {
   FileSpreadsheet,
   Scale,
   Building,
+  BarChart3,
+  CreditCard,
 } from 'lucide-react';
 
 export type ActiveTab =
@@ -43,7 +47,9 @@ export type ActiveTab =
   | 'fee-generation'
   | 'student-statements'
   | 'excel-imports'
-  | 'fine-configuration';
+  | 'fine-configuration'
+  | 'reports'
+  | 'payments';
 
 interface TabDefinition {
   id: ActiveTab;
@@ -98,6 +104,17 @@ const ALL_TABS: TabDefinition[] = [
     label: 'Fine Rules',
     icon: <Scale className="w-4 h-4 text-amber-500" />,
     allowedRoles: [UserRole.PLATFORM_SUPER_ADMIN, UserRole.SCHOOL_ADMIN],
+  },
+  {
+    id: 'reports',
+    label: 'Fee Reports',
+    icon: <BarChart3 className="w-4 h-4 text-blue-600" />,
+    allowedRoles: [UserRole.PLATFORM_SUPER_ADMIN, UserRole.SCHOOL_ADMIN, UserRole.FEE_STAFF],
+  },
+  {
+    id: 'payments',
+    label: 'Payments & Receipts',
+    icon: <CreditCard className="w-4 h-4 text-emerald-600" />,
   },
 ];
 
@@ -299,6 +316,24 @@ export const DashboardView: React.FC = () => {
                           Fine Configuration
                         </button>
                       )}
+                      {canAccess('reports') && (
+                        <button
+                          onClick={() => setActiveTab('reports')}
+                          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold bg-blue-600 hover:bg-blue-500 text-white transition-colors shadow-sm"
+                        >
+                          <BarChart3 className="w-3.5 h-3.5 text-white" />
+                          Fee Reports
+                        </button>
+                      )}
+                      {canAccess('payments') && (
+                        <button
+                          onClick={() => setActiveTab('payments')}
+                          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white transition-colors shadow-sm"
+                        >
+                          <CreditCard className="w-3.5 h-3.5 text-white" />
+                          Payments & Receipts
+                        </button>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -388,6 +423,12 @@ export const DashboardView: React.FC = () => {
 
             {/* Tab 8: Fine Configuration */}
             {activeTab === 'fine-configuration' && <FineConfigurationView />}
+
+            {/* Tab 9: Fee Reports */}
+            {activeTab === 'reports' && <FeeReportsView />}
+
+            {/* Tab 10: Fee Payments & Receipts */}
+            {activeTab === 'payments' && <PaymentsView />}
           </>
         )}
       </main>

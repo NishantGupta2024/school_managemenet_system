@@ -1,14 +1,25 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { validateEmailAddress } from '../templates/template-sanitizer';
 
-export const SUPPORTED_EMAIL_PROVIDERS = ['memory'] as const;
+export const SUPPORTED_EMAIL_PROVIDERS = ['memory', 'smtp'] as const;
 export type SupportedEmailProvider = (typeof SUPPORTED_EMAIL_PROVIDERS)[number];
+
+export interface SmtpConfig {
+  host: string;
+  port: number;
+  secure: boolean;
+  requireTls: boolean;
+  user?: string;
+  pass?: string;
+  timeoutMs: number;
+}
 
 export interface EmailPlatformConfig {
   provider: SupportedEmailProvider;
   fromAddress: string;
   defaultFromName: string;
   isDeliveryProvider: boolean;
+  smtp?: SmtpConfig;
 }
 
 @Injectable()
@@ -55,11 +66,39 @@ export class EmailConfigService {
 
     const defaultFromName = (process.env.EMAIL_DEFAULT_FROM_NAME || 'School Fee Notification').trim();
 
+    // 4. SMTP configuration validation when provider is smtp
+    let smtpConfig: SmtpConfig | undefined = undefined;
+    if (provider === 'smtp') {
+      const host = (process.env.SMTP_HOST || '').trim();
+      const rawPort = parseInt(process.env.SMTP_PORT || '587', 10);
+      const port = isNaN(rawPort) || rawPort <= 0 || rawPort > 65535 ? 587 : rawPort;
+      const secure = process.env.SMTP_SECURE === 'true' || port === 465;
+      const requireTls = process.env.SMTP_REQUIRE_TLS !== 'false'; // Enabled by default for port 587/STARTTLS
+      const user = (process.env.SMTP_USER || '').trim() || undefined;
+      const pass = process.env.SMTP_PASS || undefined;
+      const timeoutMs = Math.max(1000, parseInt(process.env.SMTP_TIMEOUT_MS || '15000', 10));
+
+      if (!host && isProduction) {
+        throw new Error('SMTP_HOST is required in production when EMAIL_PROVIDER=smtp');
+      }
+
+      smtpConfig = {
+        host: host || 'localhost',
+        port,
+        secure,
+        requireTls,
+        user,
+        pass,
+        timeoutMs,
+      };
+    }
+
     return {
       provider,
       fromAddress: validateEmailAddress(fromAddress) ? fromAddress : 'notifications@schoolfee.internal',
       defaultFromName: defaultFromName || 'School Fee Notification',
       isDeliveryProvider: provider !== 'memory',
+      smtp: smtpConfig,
     };
   }
 

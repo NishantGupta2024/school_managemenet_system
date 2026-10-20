@@ -1053,8 +1053,11 @@ describe('PaymentsService — Payment Collection Engine & Accounting Invariants'
       },
     });
 
-    const adminUserSchoolB = {
-      id: '1115f6be-92a4-4a00-9ca3-ef27ba97b47e',
+    const realAdminUserB = await prisma.user.findFirst({
+      where: { schoolId: schoolBId, role: UserRole.SCHOOL_ADMIN },
+    });
+    const adminUserSchoolB = realAdminUserB || {
+      id: '00000000-0000-0000-0000-000000000021',
       schoolId: schoolBId,
       role: UserRole.SCHOOL_ADMIN,
     };
@@ -3111,6 +3114,393 @@ describe('PaymentsService — Payment Collection Engine & Accounting Invariants'
       await cleanupInvoice(invSchoolB.id);
       await prisma.student.delete({ where: { id: studentSchoolB.id } }).catch(() => {});
     }
+  });
+
+  // -------------------------------------------------------------
+  // Task 1 & Task 5: Idempotency Key Lookup & Uncertainty Recovery Engine
+  // -------------------------------------------------------------
+  describe('Idempotency Key Lookup & Uncertainty Recovery Engine (FEE-P0-003-FIX-4)', () => {
+    it('should successfully look up a committed payment collection by idempotency key', async () => {
+      const inv = await createTestInvoice({ month: 151, grossAmount: 3000 });
+      const idempotencyKey = `lookup-collect-${Date.now()}`;
+      try {
+        const payRes = await service.collectPayment(
+          schoolAId,
+          adminUserSchoolA,
+          {
+            studentId: testStudentId,
+            academicYearId: testAcademicYearId,
+            amount: 3000,
+            paymentMethod: PaymentMethod.CASH,
+            referenceNumber: 'REF-LOOKUP-01',
+            idempotencyKey,
+          },
+          idempotencyKey,
+        );
+
+        expect(payRes.payment.id).toBeDefined();
+
+        const lookup = await service.lookupByIdempotencyKey(schoolAId, adminUserSchoolA, idempotencyKey);
+        expect(lookup.found).toBe(true);
+        expect(lookup.operationType).toBe('COLLECTION');
+        expect(lookup.payment).toBeDefined();
+        expect(lookup.payment!.id).toBe(payRes.payment.id);
+        expect(lookup.payment!.amount).toBe(3000);
+        expect(lookup.payment!.status).toBe(PaymentStatus.COMPLETED);
+        expect(lookup.receipt).toBeDefined();
+        expect(lookup.receipt!.receiptNumber).toBe(payRes.receipt.receiptNumber);
+      } finally {
+        await cleanupInvoice(inv.id);
+      }
+    });
+
+    it('should return found: false when looking up a non-existent idempotency key', async () => {
+      const lookup = await service.lookupByIdempotencyKey(schoolAId, adminUserSchoolA, `non-existent-key-${Date.now()}`);
+      expect(lookup.found).toBe(false);
+      expect(lookup.operationType).toBeUndefined();
+    });
+
+    it('should enforce strict tenant isolation: School B cannot discover School A operation by idempotency key', async () => {
+      const inv = await createTestInvoice({ month: 152, grossAmount: 2500 });
+      const idempotencyKey = `cross-tenant-key-${Date.now()}`;
+      try {
+        await service.collectPayment(
+          schoolAId,
+          adminUserSchoolA,
+          {
+            studentId: testStudentId,
+            academicYearId: testAcademicYearId,
+            amount: 2500,
+            paymentMethod: PaymentMethod.CASH,
+            idempotencyKey,
+          },
+          idempotencyKey,
+        );
+
+        const adminUserSchoolB = {
+          id: '00000000-0000-0000-0000-000000000021',
+          schoolId: schoolBId,
+          role: UserRole.SCHOOL_ADMIN,
+        };
+        const lookupSchoolB = await service.lookupByIdempotencyKey(schoolBId, adminUserSchoolB, idempotencyKey);
+        expect(lookupSchoolB.found).toBe(false);
+      } finally {
+        await cleanupInvoice(inv.id);
+      }
+    });
+
+    it('should enforce role authorization: reject missing or unauthorized users with ForbiddenException', async () => {
+      await expect(
+        service.lookupByIdempotencyKey(schoolAId, null, 'any-key'),
+      ).rejects.toThrow(ForbiddenException);
+
+      await expect(
+        service.lookupByIdempotencyKey(schoolAId, undefined, 'any-key'),
+      ).rejects.toThrow(ForbiddenException);
+
+      await expect(
+        service.lookupByIdempotencyKey(schoolAId, studentUser, 'any-key'),
+      ).rejects.toThrow(ForbiddenException);
+
+      await expect(
+        service.lookupByIdempotencyKey(schoolAId, parentUser, 'any-key'),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('should reject invalid or empty idempotency keys with BadRequestException', async () => {
+      await expect(
+        service.lookupByIdempotencyKey(schoolAId, adminUserSchoolA, ''),
+      ).rejects.toThrow(BadRequestException);
+
+      await expect(
+        service.lookupByIdempotencyKey(schoolAId, adminUserSchoolA, '   '),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('should successfully look up a committed payment reversal by idempotency key', async () => {
+      const inv = await createTestInvoice({ month: 153, grossAmount: 4000 });
+      const reversalKey = `lookup-rev-${Date.now()}`;
+      try {
+        const payRes = await service.collectPayment(schoolAId, adminUserSchoolA, {
+          studentId: testStudentId,
+          academicYearId: testAcademicYearId,
+          amount: 4000,
+          paymentMethod: PaymentMethod.CASH,
+        });
+
+        const revRes = await service.reversePayment(
+          schoolAId,
+          adminUserSchoolA,
+          payRes.payment.id,
+          {
+            reversalType: ReversalType.VOID,
+            reason: 'Audit justification for reversal outcome recovery test',
+            idempotencyKey: reversalKey,
+          },
+          reversalKey,
+        );
+        expect(revRes.reversal.id).toBeDefined();
+
+        const lookup = await service.lookupByIdempotencyKey(schoolAId, adminUserSchoolA, reversalKey);
+        expect(lookup.found).toBe(true);
+        expect(lookup.operationType).toBe('REVERSAL');
+        expect(lookup.status).toBe('SUCCEEDED');
+        expect(lookup.reversal).toBeDefined();
+        expect(lookup.reversal!.id).toBe(revRes.reversal.id);
+        expect(lookup.reversal!.paymentId).toBe(payRes.payment.id);
+        expect(lookup.reversal!.totalAmount).toBe(4000);
+      } finally {
+        await cleanupInvoice(inv.id);
+      }
+    });
+
+    it('should successfully look up a committed payment refund by idempotency key', async () => {
+      const inv = await createTestInvoice({ month: 154, grossAmount: 5000 });
+      const refundKey = `lookup-ref-${Date.now()}`;
+      try {
+        const payRes = await service.collectPayment(schoolAId, adminUserSchoolA, {
+          studentId: testStudentId,
+          academicYearId: testAcademicYearId,
+          amount: 5000,
+          paymentMethod: PaymentMethod.CASH,
+        });
+
+        const refRes = await service.createRefund(
+          schoolAId,
+          adminUserSchoolA,
+          payRes.payment.id,
+          {
+            amount: 2000,
+            reason: 'Partial refund outcome recovery test',
+            mode: 'BANK_TRANSFER',
+            referenceNumber: 'UTR-REF-001',
+            status: RefundStatus.SUCCEEDED,
+            idempotencyKey: refundKey,
+          },
+          refundKey,
+        );
+        expect(refRes.refund.id).toBeDefined();
+
+        const lookup = await service.lookupByIdempotencyKey(schoolAId, adminUserSchoolA, refundKey);
+        expect(lookup.found).toBe(true);
+        expect(lookup.operationType).toBe('REFUND');
+        expect(lookup.status).toBe(RefundStatus.SUCCEEDED);
+        expect(lookup.refund).toBeDefined();
+        expect(lookup.refund!.id).toBe(refRes.refund.id);
+        expect(lookup.refund!.refundAmount).toBe(2000);
+      } finally {
+        await cleanupInvoice(inv.id);
+      }
+    });
+  });
+
+  // -------------------------------------------------------------
+  // FIX-6A / FIX-7A: Same-Key Collection Retry Race on Final Invoice Payoff
+  // -------------------------------------------------------------
+  describe('Same-Key Collection Retry Race on Final Invoice Payoff (FEE-P0-003-FIX-7A)', () => {
+    it('should return idempotent replay when retry observes no eligible invoices after original request pays off final invoice', async () => {
+      // 1. Create a single invoice for the student for ₹2,500
+      const inv = await createTestInvoice({ month: 155, grossAmount: 2500 });
+      const idempotencyKey = `race-retry-idem-${Date.now()}`;
+      const payload = {
+        studentId: testStudentId,
+        academicYearId: testAcademicYearId,
+        amount: 2500,
+        paymentMethod: PaymentMethod.CASH,
+        referenceNumber: 'REF-RACE-001',
+        idempotencyKey,
+      };
+
+      try {
+        // 2. Original request commits and pays off the final outstanding invoice
+        const firstResult = await service.collectPayment(
+          schoolAId,
+          adminUserSchoolA,
+          payload,
+          idempotencyKey,
+        );
+        expect(firstResult.isIdempotentReplay).toBe(false);
+        const originalPaymentId = firstResult.payment.id;
+        const originalReceiptNumber = firstResult.receipt.receiptNumber;
+
+        // Verify invoice is now PAID in database
+        const updatedInv = await prisma.feeInvoice.findUnique({ where: { id: inv.id } });
+        expect(updatedInv!.status).toBe(InvoiceStatus.PAID);
+
+        // 3. Spy on the outer prisma.payment.findUnique so the retry does NOT take the pre-transaction early exit.
+        // This forces the retry into $transaction where candidateInvoices discovery sees targetInvoiceIds.length === 0.
+        const outerFindUniqueSpy = (jest
+          .spyOn(prisma.payment, 'findUnique') as any)
+          .mockImplementationOnce(async () => null);
+
+        // 4. Inside $transaction, simulate Tx2 having started before Tx1 committed:
+        // - Call 1 (early in-tx check at line 225) returns null
+        // - candidateInvoices discovery returns empty (invoices paid off by Tx1)
+        // - Call 2 (in-tx no-invoice check at line 321) executes and returns Tx1's payment!
+        let inTxFindUniqueCallCount = 0;
+        const originalTransaction = prisma.$transaction.bind(prisma);
+        const txSpy = jest
+          .spyOn(prisma, '$transaction')
+          .mockImplementationOnce(async (callback: any, options?: any) => {
+            return originalTransaction(async (tx: any) => {
+              const originalTxFindUnique = tx.payment.findUnique.bind(tx.payment);
+              tx.payment.findUnique = jest.fn(async (args: any) => {
+                inTxFindUniqueCallCount++;
+                if (inTxFindUniqueCallCount === 1) {
+                  return null; // Simulate early check returning null
+                }
+                return originalTxFindUnique(args);
+              });
+              return callback(tx);
+            }, options);
+          });
+
+        // 5. Execute the same-key retry
+        const retryResult = await service.collectPayment(
+          schoolAId,
+          adminUserSchoolA,
+          payload,
+          idempotencyKey,
+        );
+
+        // Assert outer check returned null and in-tx Call 2 (line 321) executed!
+        expect(outerFindUniqueSpy).toHaveBeenCalledTimes(1);
+        expect(inTxFindUniqueCallCount).toBe(2);
+
+        // Assert idempotent replay is returned, NOT a 400 error!
+        expect(retryResult.isIdempotentReplay).toBe(true);
+        expect(retryResult.payment.id).toBe(originalPaymentId);
+        expect(retryResult.receipt.receiptNumber).toBe(originalReceiptNumber);
+
+        // Assert strictly one payment record exists in DB
+        const paymentsInDb = await prisma.payment.findMany({
+          where: { schoolId: schoolAId, idempotencyKey },
+        });
+        expect(paymentsInDb.length).toBe(1);
+
+        // Assert strictly one set of allocations exists in DB
+        const allocationsInDb = await prisma.paymentAllocation.findMany({
+          where: { invoiceId: inv.id },
+        });
+        const totalAllocated = allocationsInDb.reduce(
+          (sum, a) => sum + Number(a.allocatedAmount),
+          0,
+        );
+        expect(totalAllocated).toBe(2500);
+
+        // Assert strictly one receipt exists in DB
+        const receiptsInDb = await prisma.receipt.findMany({
+          where: { paymentId: originalPaymentId },
+        });
+        expect(receiptsInDb.length).toBe(1);
+
+        outerFindUniqueSpy.mockRestore();
+        txSpy.mockRestore();
+
+        // 6. Test that a same-key request with a mutated payload hits line 343 and throws 409 ConflictException
+        const outerConflictSpy = (jest
+          .spyOn(prisma.payment, 'findUnique') as any)
+          .mockImplementationOnce(async () => null);
+
+        let inTxConflictCalls = 0;
+        const txSpyConflict = jest
+          .spyOn(prisma, '$transaction')
+          .mockImplementationOnce(async (callback: any, options?: any) => {
+            return originalTransaction(async (tx: any) => {
+              const originalTxFindUnique = tx.payment.findUnique.bind(tx.payment);
+              tx.payment.findUnique = jest.fn(async (args: any) => {
+                inTxConflictCalls++;
+                if (inTxConflictCalls === 1) return null;
+                return originalTxFindUnique(args);
+              });
+              return callback(tx);
+            }, options);
+          });
+
+        await expect(
+          service.collectPayment(
+            schoolAId,
+            adminUserSchoolA,
+            {
+              ...payload,
+              amount: 9999, // Mutated payload with different hash
+            },
+            idempotencyKey,
+          ),
+        ).rejects.toThrow(ConflictException);
+
+        expect(outerConflictSpy).toHaveBeenCalledTimes(1);
+        expect(inTxConflictCalls).toBe(2);
+
+        outerConflictSpy.mockRestore();
+        txSpyConflict.mockRestore();
+
+        // 7. Test that a genuinely new payment with a DIFFERENT key and no outstanding invoices receives 400 BadRequestException
+        const differentKey = `genuinely-new-key-${Date.now()}`;
+        await expect(
+          service.collectPayment(
+            schoolAId,
+            adminUserSchoolA,
+            {
+              studentId: testStudentId,
+              academicYearId: testAcademicYearId,
+              amount: 1000,
+              paymentMethod: PaymentMethod.CASH,
+              idempotencyKey: differentKey,
+            },
+            differentKey,
+          ),
+        ).rejects.toThrow(BadRequestException);
+      } finally {
+        await cleanupInvoice(inv.id);
+      }
+    });
+
+    it('concurrent requests with the same key and payload cannot create duplicate payments, allocations, or receipts', async () => {
+      const inv = await createTestInvoice({ month: 156, grossAmount: 1800 });
+      const concurrencyKey = `concur-race-key-${Date.now()}`;
+      const payload = {
+        studentId: testStudentId,
+        academicYearId: testAcademicYearId,
+        amount: 1800,
+        paymentMethod: PaymentMethod.CASH,
+        referenceNumber: 'REF-CONCUR-001',
+        idempotencyKey: concurrencyKey,
+      };
+
+      try {
+        const [res1, res2] = await Promise.all([
+          service.collectPayment(schoolAId, adminUserSchoolA, payload, concurrencyKey),
+          service.collectPayment(schoolAId, adminUserSchoolA, payload, concurrencyKey),
+        ]);
+
+        // Exactly one created original payment and one received idempotent replay
+        expect(res1.payment.id).toBe(res2.payment.id);
+        expect(res1.receipt.receiptNumber).toBe(res2.receipt.receiptNumber);
+        expect([res1.isIdempotentReplay, res2.isIdempotentReplay].sort()).toEqual([false, true]);
+
+        // Strictly 1 payment in DB
+        const dbPayments = await prisma.payment.findMany({
+          where: { schoolId: schoolAId, idempotencyKey: concurrencyKey },
+        });
+        expect(dbPayments.length).toBe(1);
+
+        // Strictly 1 set of allocations in DB totalling 1800
+        const dbAllocations = await prisma.paymentAllocation.findMany({
+          where: { invoiceId: inv.id },
+        });
+        const total = dbAllocations.reduce((sum, a) => sum + Number(a.allocatedAmount), 0);
+        expect(total).toBe(1800);
+
+        // Strictly 1 receipt in DB
+        const dbReceipts = await prisma.receipt.findMany({
+          where: { paymentId: res1.payment.id },
+        });
+        expect(dbReceipts.length).toBe(1);
+      } finally {
+        await cleanupInvoice(inv.id);
+      }
+    });
   });
 });
 

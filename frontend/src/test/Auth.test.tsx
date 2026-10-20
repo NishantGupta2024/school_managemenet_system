@@ -63,6 +63,96 @@ vi.mock('../services/api', () => {
     feeStatementApi: { getStatement: vi.fn() },
     excelImportsApi: { downloadTemplate: vi.fn(), preview: vi.fn(), confirm: vi.fn() },
     fineRulesApi: { list: vi.fn().mockResolvedValue([]), listInvoices: vi.fn().mockResolvedValue([]) },
+    reportsApi: {
+      getDailyCollection: vi.fn().mockResolvedValue({
+        school: { id: 'sch-1', name: 'Demo School', currency: 'INR', timezone: 'Asia/Kolkata' },
+        period: { date: '2026-10-17' },
+        summary: { grossCollections: 0, totalReversals: 0, totalRefunds: 0, netCollections: 0, transactionCount: 0 },
+        transactions: [],
+        byPaymentMethod: [],
+        byFeeHead: [],
+      }),
+      getMonthlyCollection: vi.fn().mockResolvedValue({
+        school: { id: 'sch-1', name: 'Demo School', currency: 'INR', timezone: 'Asia/Kolkata' },
+        period: { year: 2026, month: 10 },
+        summary: { grossCollections: 0, totalReversals: 0, totalRefunds: 0, netCollections: 0, transactionCount: 0 },
+        dailyBreakdown: [],
+        byPaymentMethod: [],
+        byFeeHead: [],
+      }),
+      getCollectionSummary: vi.fn().mockResolvedValue({
+        school: { id: 'sch-1', name: 'Demo School', currency: 'INR', timezone: 'Asia/Kolkata' },
+        period: { startDate: '2026-10-01', endDate: '2026-10-17' },
+        summary: { grossCollections: 0, totalReversals: 0, totalRefunds: 0, netCollections: 0, transactionCount: 0 },
+        periodicBreakdown: [],
+        byPaymentMethod: [],
+        byFeeHead: [],
+      }),
+      getOutstandingDues: vi.fn().mockResolvedValue({
+        school: { id: 'sch-1', name: 'Demo School', currency: 'INR', timezone: 'Asia/Kolkata' },
+        filters: {},
+        pagination: { page: 1, limit: 20, totalRecords: 0, totalPages: 1, hasNextPage: false, hasPrevPage: false },
+        summary: {
+          totalStudents: 0,
+          totalBilledAmount: 0,
+          totalPaidAmount: 0,
+          totalPaidPrincipal: 0,
+          totalPaidFines: 0,
+          totalRemainingPrincipal: 0,
+          totalFineBalance: 0,
+          totalOutstandingAmount: 0,
+          totalOverduePrincipal: 0,
+          totalOverdueFines: 0,
+          totalOverdueAmount: 0,
+          overdueStudentsCount: 0,
+        },
+        records: [],
+      }),
+      getDefaultersReport: vi.fn().mockResolvedValue({
+        school: { id: 'sch-1', name: 'Demo School', currency: 'INR', timezone: 'Asia/Kolkata' },
+        filters: {},
+        pagination: { page: 1, limit: 20, totalRecords: 0, totalPages: 1, hasNextPage: false, hasPrevPage: false },
+        summary: {
+          totalStudents: 0,
+          totalBilledAmount: 0,
+          totalPaidAmount: 0,
+          totalPaidPrincipal: 0,
+          totalPaidFines: 0,
+          totalRemainingPrincipal: 0,
+          totalFineBalance: 0,
+          totalOutstandingAmount: 0,
+          totalOverduePrincipal: 0,
+          totalOverdueFines: 0,
+          totalOverdueAmount: 0,
+          overdueStudentsCount: 0,
+        },
+        records: [],
+      }),
+      getClassCollections: vi.fn().mockResolvedValue({
+        school: { id: 'sch-1', name: 'Demo School', currency: 'INR', timezone: 'Asia/Kolkata' },
+        period: { startDate: '2026-10-01', endDate: '2026-10-17' },
+        filters: {},
+        summary: { grossCollections: 0, totalReversals: 0, totalRefunds: 0, netCollections: 0, transactionCount: 0 },
+        byClass: [],
+      }),
+      getFineSummary: vi.fn().mockResolvedValue({
+        school: { id: 'sch-1', name: 'Demo School', currency: 'INR', timezone: 'Asia/Kolkata' },
+        filters: {},
+        summary: {
+          totalAssessed: 0,
+          totalWaived: 0,
+          netObligation: 0,
+          totalCollected: 0,
+          totalReversals: 0,
+          totalRefunds: 0,
+          netCollected: 0,
+          remainingBalance: 0,
+          fineCount: 0,
+        },
+        byClass: [],
+      }),
+      exportReport: vi.fn().mockResolvedValue('daily_collection_2026-10-17.csv'),
+    },
   };
 });
 
@@ -406,6 +496,7 @@ describe('Frontend Authentication & Route Protection', () => {
       expect(screen.queryByRole('button', { name: /Monthly Invoicing/i })).not.toBeInTheDocument();
       expect(screen.queryByRole('button', { name: /Excel Imports/i })).not.toBeInTheDocument();
       expect(screen.queryByRole('button', { name: /Fine Rules/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /Fee Reports/i })).not.toBeInTheDocument();
     });
 
     it('restricts FEE_STAFF from Fine Configuration tab', async () => {
@@ -440,6 +531,9 @@ describe('Frontend Authentication & Route Protection', () => {
       expect(screen.getByRole('button', { name: /^Student Allocations$/i })).toBeInTheDocument();
       expect(screen.getByRole('button', { name: /Monthly Invoicing/i })).toBeInTheDocument();
       expect(screen.getByRole('button', { name: /Excel Imports/i })).toBeInTheDocument();
+      // Fee Reports must be accessible to FEE_STAFF
+      const feeReportButtons = screen.getAllByRole('button', { name: /Fee Reports/i });
+      expect(feeReportButtons.length).toBeGreaterThanOrEqual(1);
       // Fine Rules must not be shown to FEE_STAFF
       expect(screen.queryByRole('button', { name: /Fine Rules/i })).not.toBeInTheDocument();
     });

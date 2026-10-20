@@ -158,10 +158,10 @@ describe('Email Provider & Configuration', () => {
       expect(configService.isDeliveryProvider).toBe(false);
     });
 
-    it('should fail clearly on unsupported provider names (e.g. smtp, custom, resend) instead of silent fallback', () => {
-      process.env.EMAIL_PROVIDER = 'smtp';
+    it('should fail clearly on unsupported provider names (e.g. sendgrid, custom, resend) instead of silent fallback', () => {
+      process.env.EMAIL_PROVIDER = 'sendgrid';
       expect(() => new EmailConfigService()).toThrow(
-        /Unsupported or unconfigured email provider 'smtp'/,
+        /Unsupported or unconfigured email provider 'sendgrid'/,
       );
 
       process.env.EMAIL_PROVIDER = 'custom';
@@ -173,6 +173,15 @@ describe('Email Provider & Configuration', () => {
       expect(() => new EmailConfigService()).toThrow(
         /Unsupported or unconfigured email provider 'unsupported_vendor'/,
       );
+    });
+
+    it('should accept smtp as registered supported provider', () => {
+      process.env.EMAIL_PROVIDER = 'smtp';
+      process.env.SMTP_HOST = 'smtp.test.internal';
+      const configService = new EmailConfigService();
+      expect(configService.provider).toBe('smtp');
+      expect(configService.isDeliveryProvider).toBe(true);
+      expect(configService.getConfig().smtp?.host).toBe('smtp.test.internal');
     });
 
     it('should enforce production safety and reject non-delivering memory provider in production', () => {

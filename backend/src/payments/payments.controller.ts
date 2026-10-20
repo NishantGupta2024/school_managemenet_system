@@ -176,6 +176,21 @@ export class PaymentsController {
     return this.paymentsService.findReceiptByNumber(schoolId, user, receiptNumber);
   }
 
+  @Get('idempotency/:key')
+  @Roles(
+    UserRole.PLATFORM_SUPER_ADMIN,
+    UserRole.SCHOOL_ADMIN,
+    UserRole.FEE_STAFF,
+  )
+  async lookupIdempotency(
+    @Request() req: any,
+    @Param('key') key: string,
+  ) {
+    const schoolId = req.school.id;
+    const user = req.user;
+    return this.paymentsService.lookupByIdempotencyKey(schoolId, user, key);
+  }
+
   @Get(':id/refunds')
   @Roles(
     UserRole.PLATFORM_SUPER_ADMIN,

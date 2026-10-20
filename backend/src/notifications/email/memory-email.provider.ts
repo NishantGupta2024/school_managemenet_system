@@ -34,10 +34,12 @@ export function normalizeEmailError(err: any): EmailProviderError {
   }
 
   const rawMsg = typeof err?.message === 'string' ? err.message : 'Unknown provider error';
-  // Strip any accidental bearer tokens or authorization headers
+  // Strip any accidental bearer tokens, passwords, or authorization headers
   const sanitizedMessage = rawMsg
     .replace(/(bearer\s+)[a-zA-Z0-9_\-\.]+/gi, '$1[REDACTED]')
     .replace(/(api[_\-]?key[:=]\s*)[a-zA-Z0-9_\-\.]+/gi, '$1[REDACTED]')
+    .replace(/(password[:=]\s*)[^\s]+/gi, '$1[REDACTED]')
+    .replace(/(auth\s+login\s+)[a-zA-Z0-9+/=]+/gi, '$1[REDACTED]')
     .slice(0, 500);
 
   const rawCode = String(err?.code || err?.status || err?.statusCode || 'UNKNOWN');

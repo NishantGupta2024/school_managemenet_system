@@ -69,6 +69,7 @@ export const ExcelImportView: React.FC = () => {
   const handleDownloadTemplate = async () => {
     try {
       setDownloadingTemplate(true);
+      setErrorMessage(null);
       const blob = await excelImportsApi.downloadTemplate(importType);
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
@@ -76,10 +77,12 @@ export const ExcelImportView: React.FC = () => {
       link.setAttribute('download', `${importType.toLowerCase()}_template.xlsx`);
       document.body.appendChild(link);
       link.click();
-      link.parentNode?.removeChild(link);
-      window.URL.revokeObjectURL(url);
+      setTimeout(() => {
+        document.body.removeChild(link);
+        window.URL.revokeObjectURL(url);
+      }, 1000);
     } catch (err: any) {
-      setErrorMessage(err.response?.data?.message || 'Failed to download template');
+      setErrorMessage(err.message || err.response?.data?.message || 'Failed to download template');
     } finally {
       setDownloadingTemplate(false);
     }

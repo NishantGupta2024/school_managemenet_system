@@ -2,6 +2,8 @@ export interface RenderedEmail {
   subject: string;
   html: string;
   text: string;
+  htmlBody?: string;
+  textBody?: string;
 }
 
 export interface ReceiptLineItemSnapshot {
@@ -61,4 +63,57 @@ export interface RefundFailedTemplateData {
   currency?: string;
   failureReason: string;
   attemptedDate: string;
+}
+
+export interface PaymentPendingTemplateData {
+  schoolName: string;
+  studentName: string;
+  admissionNumber: string;
+  paymentNumber: string;
+  paymentAmount: number | string;
+  currency?: string;
+  paymentMethod: string;
+  initiatedAt: string;
+  verificationNotes?: string;
+}
+
+export interface PaymentFailedTemplateData {
+  schoolName: string;
+  studentName: string;
+  admissionNumber: string;
+  paymentNumber: string;
+  attemptedAmount: number | string;
+  currency?: string;
+  paymentMethod: string;
+  failureReason: string;
+  attemptedAt: string;
+}
+
+export type FeeReminderMilestone =
+  | 'DUE_IN_7_DAYS'
+  | 'DUE_IN_1_DAY'
+  | 'DUE_TODAY'
+  | 'OVERDUE';
+
+export interface FeeReminderLineItem {
+  feeHeadName: string;
+  amount: number | string;
+}
+
+export interface FeeReminderTemplateData {
+  schoolName: string;
+  studentName: string;
+  admissionNumber: string;
+  gradeName?: string;
+  sectionName?: string;
+  academicYearName?: string;
+  billingMonthName?: string;
+  milestone: FeeReminderMilestone;
+  dueDate: string;
+  totalFeeAmount: number | string;
+  paidAmount?: number | string;
+  balanceDue: number | string;
+  currency?: string;
+  lineItems?: FeeReminderLineItem[];
+  daysOverdue?: number;
 }

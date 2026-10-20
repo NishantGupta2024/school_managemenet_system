@@ -11,6 +11,7 @@ import { EmailProvider } from '../email/email-provider.interface';
 import { EmailErrorCategory, EmailProviderError, EmailSendResult } from '../email/email.types';
 import { MemoryEmailProvider } from '../email/memory-email.provider';
 import { EmailTemplateRenderer } from '../templates/email-template.renderer';
+import { WhatsAppProvider } from '../whatsapp/whatsapp-provider.interface';
 import { NotificationOutboxWorker } from './notification-outbox.worker';
 
 describe('NotificationOutboxWorker', () => {
@@ -19,6 +20,7 @@ describe('NotificationOutboxWorker', () => {
   let emailProvider: EmailProvider;
   let emailConfigService: EmailConfigService;
   let templateRenderer: EmailTemplateRenderer;
+  let whatsappProvider: WhatsAppProvider;
 
   const originalEnv = process.env;
 
@@ -70,6 +72,16 @@ describe('NotificationOutboxWorker', () => {
       }),
     };
 
+    const mockWhatsAppProvider: Partial<WhatsAppProvider> = {
+      sendWhatsAppMessage: jest.fn().mockResolvedValue({
+        providerMessageId: 'wamid.test_msg_123',
+        accepted: true,
+        timestamp: new Date(),
+      }),
+      isDeliveryProvider: jest.fn().mockReturnValue(true),
+      getProviderName: jest.fn().mockReturnValue('mock-whatsapp'),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         NotificationOutboxWorker,
@@ -77,6 +89,7 @@ describe('NotificationOutboxWorker', () => {
         { provide: EmailProvider, useValue: mockEmailProvider },
         { provide: EmailConfigService, useValue: mockEmailConfigService },
         { provide: EmailTemplateRenderer, useValue: mockTemplateRenderer },
+        { provide: WhatsAppProvider, useValue: mockWhatsAppProvider },
       ],
     }).compile();
 
@@ -85,6 +98,7 @@ describe('NotificationOutboxWorker', () => {
     emailProvider = module.get<EmailProvider>(EmailProvider);
     emailConfigService = module.get<EmailConfigService>(EmailConfigService);
     templateRenderer = module.get<EmailTemplateRenderer>(EmailTemplateRenderer);
+    whatsappProvider = module.get<WhatsAppProvider>(WhatsAppProvider);
   });
 
   afterEach(async () => {
@@ -119,16 +133,47 @@ describe('NotificationOutboxWorker', () => {
   });
 
   describe('Configuration & Lifecycle', () => {
-    it('initializes with default settings', () => {
-      expect(worker.isEnabled).toBe(true);
+    it('fails closed and initializes as DISABLED by default when NOTIFICATION_WORKER_ENABLED is unset', () => {
+      expect(worker.isEnabled).toBe(false);
       expect(worker.batchSize).toBe(10);
       expect(worker.intervalMs).toBe(5000);
       expect(worker.lockDurationMs).toBe(300000);
       expect(worker.maxAttempts).toBe(5);
     });
 
-    it('respects custom environment configuration', () => {
-      process.env.NOTIFICATION_WORKER_ENABLED = 'false';
+    it('enables the worker only when NOTIFICATION_WORKER_ENABLED is strictly equal to "true"', () => {
+      // Truth table tests for worker enablement
+      const testCases: Array<{ val: string | undefined; expected: boolean }> = [
+        { val: 'true', expected: true },
+        { val: 'false', expected: false },
+        { val: '', expected: false },
+        { val: undefined, expected: false },
+        { val: '1', expected: false },
+        { val: 'yes', expected: false },
+        { val: 'TRUE', expected: false },
+        { val: 'True', expected: false },
+      ];
+
+      for (const tc of testCases) {
+        if (tc.val === undefined) {
+          delete process.env.NOTIFICATION_WORKER_ENABLED;
+        } else {
+          process.env.NOTIFICATION_WORKER_ENABLED = tc.val;
+        }
+
+        const testWorker = new NotificationOutboxWorker(
+          prisma,
+          emailProvider,
+          emailConfigService,
+          templateRenderer,
+        );
+
+        expect(testWorker.isEnabled).toBe(tc.expected);
+      }
+    });
+
+    it('respects custom environment configuration when enabled', () => {
+      process.env.NOTIFICATION_WORKER_ENABLED = 'true';
       process.env.NOTIFICATION_WORKER_BATCH_SIZE = '25';
       process.env.NOTIFICATION_WORKER_INTERVAL_MS = '2000';
       process.env.NOTIFICATION_WORKER_LOCK_DURATION_MS = '60000';
@@ -141,15 +186,15 @@ describe('NotificationOutboxWorker', () => {
         templateRenderer,
       );
 
-      expect(customWorker.isEnabled).toBe(false);
+      expect(customWorker.isEnabled).toBe(true);
       expect(customWorker.batchSize).toBe(25);
       expect(customWorker.intervalMs).toBe(2000);
       expect(customWorker.lockDurationMs).toBe(60000);
       expect(customWorker.maxAttempts).toBe(3);
     });
 
-    it('does not schedule tick on bootstrap if disabled', () => {
-      process.env.NOTIFICATION_WORKER_ENABLED = 'false';
+    it('does not schedule tick on bootstrap if disabled (default)', () => {
+      delete process.env.NOTIFICATION_WORKER_ENABLED;
       const disabledWorker = new NotificationOutboxWorker(
         prisma,
         emailProvider,
@@ -160,6 +205,7 @@ describe('NotificationOutboxWorker', () => {
       const spy = jest.spyOn(global, 'setTimeout');
       disabledWorker.onApplicationBootstrap();
       expect(spy).not.toHaveBeenCalled();
+      spy.mockRestore();
     });
 
     it('clears timer and waits for active batch on shutdown', async () => {
@@ -292,6 +338,197 @@ describe('NotificationOutboxWorker', () => {
           outcome: NotificationStatus.SENT,
           providerMessageId: 'msg-abc-123',
           retryScheduled: false,
+        }),
+      });
+    });
+
+    it('correctly maps html and text properties to htmlBody and textBody when renderer returns standard RenderedEmail', async () => {
+      const record = createSampleOutboxRecord();
+      (templateRenderer.render as jest.Mock).mockReturnValue({
+        subject: 'Standard Rendered Subject',
+        html: '<p>Standard HTML</p>',
+        text: 'Standard Plain Text',
+      });
+      (emailProvider.sendEmail as jest.Mock).mockResolvedValue({
+        accepted: true,
+        providerMessageId: 'msg-standard-123',
+        timestamp: new Date(),
+      });
+      (prisma.notificationOutbox.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
+      (prisma.notificationDeliveryAttempt.create as jest.Mock).mockResolvedValue({ id: 'att-std-1' });
+
+      const status = await worker.processSingleRecord(record);
+
+      expect(status).toBe(NotificationStatus.SENT);
+      expect(emailProvider.sendEmail).toHaveBeenCalledWith(
+        expect.objectContaining({
+          subject: 'Standard Rendered Subject',
+          htmlBody: '<p>Standard HTML</p>',
+          textBody: 'Standard Plain Text',
+        }),
+      );
+    });
+
+    it('dispatches to WhatsAppProvider when record.channel is WHATSAPP without calling emailProvider', async () => {
+      const record = createSampleOutboxRecord({
+        id: 'outbox-wa-1',
+      });
+      (record as any).channel = 'WHATSAPP';
+      (record as any).recipientPhone = '+919876543210';
+      (record.templateData as any) = { studentName: 'Rohan', amount: 5000 };
+
+      (prisma.schoolNotificationSetting.findUnique as jest.Mock).mockResolvedValue({ whatsappEnabled: true });
+      (prisma.notificationOutbox.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
+      (prisma.notificationDeliveryAttempt.create as jest.Mock).mockResolvedValue({ id: 'att-wa-1' });
+
+      const status = await worker.processSingleRecord(record);
+
+      expect(status).toBe(NotificationStatus.SENT);
+      expect(whatsappProvider.sendWhatsAppMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          toPhone: '+919876543210',
+          templateName: 'receipt_issued',
+          idempotencyKey: record.idempotencyKey,
+        }),
+      );
+      expect(emailProvider.sendEmail).not.toHaveBeenCalled();
+      expect(prisma.notificationDeliveryAttempt.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          notificationOutboxId: 'outbox-wa-1',
+          outcome: NotificationStatus.SENT,
+          providerMessageId: 'wamid.test_msg_123',
+          retryScheduled: false,
+        }),
+      });
+    });
+
+    it('marks record as SKIPPED if WHATSAPP channel has missing recipient phone', async () => {
+      const record = createSampleOutboxRecord({
+        id: 'outbox-wa-no-phone',
+      });
+      (record as any).channel = 'WHATSAPP';
+      (record as any).recipientPhone = null;
+      (record.templateData as any) = {};
+
+      (prisma.notificationOutbox.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
+      (prisma.notificationDeliveryAttempt.create as jest.Mock).mockResolvedValue({ id: 'att-wa-skip' });
+
+      const status = await worker.processSingleRecord(record);
+
+      expect(status).toBe(NotificationStatus.SKIPPED);
+      expect(whatsappProvider.sendWhatsAppMessage).not.toHaveBeenCalled();
+      expect(emailProvider.sendEmail).not.toHaveBeenCalled();
+      expect(prisma.notificationOutbox.updateMany).toHaveBeenCalledWith({
+        where: expect.objectContaining({ id: 'outbox-wa-no-phone' }),
+        data: expect.objectContaining({
+          status: NotificationStatus.SKIPPED,
+          skipReason: 'NO_VALID_RECIPIENT_PHONE',
+        }),
+      });
+    });
+
+    it('marks record as FAILED if WHATSAPP provider is not available in worker', async () => {
+      const workerWithoutWa = new NotificationOutboxWorker(
+        prisma,
+        emailProvider,
+        emailConfigService,
+        templateRenderer,
+        undefined, // No WhatsAppProvider
+      );
+
+      const record = createSampleOutboxRecord({
+        id: 'outbox-wa-no-prov',
+      });
+      (record as any).channel = 'WHATSAPP';
+      (record as any).recipientPhone = '+919876543210';
+
+      (prisma.notificationOutbox.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
+      (prisma.notificationDeliveryAttempt.create as jest.Mock).mockResolvedValue({ id: 'att-wa-fail' });
+
+      const status = await workerWithoutWa.processSingleRecord(record);
+
+      expect(status).toBe(NotificationStatus.FAILED);
+      expect(prisma.notificationOutbox.updateMany).toHaveBeenCalledWith({
+        where: expect.objectContaining({ id: 'outbox-wa-no-prov' }),
+        data: expect.objectContaining({
+          status: NotificationStatus.FAILED,
+          lastErrorCode: 'WHATSAPP_PROVIDER_UNAVAILABLE',
+        }),
+      });
+    });
+
+    it('fails closed with WHATSAPP_TENANT_PREFERENCE_UNVERIFIED if tenant WhatsApp preference cannot be verified', async () => {
+      const record = createSampleOutboxRecord({
+        id: 'outbox-wa-unverified-pref',
+      });
+      (record as any).channel = 'WHATSAPP';
+      (record as any).recipientPhone = '+919876543210';
+
+      (prisma.schoolNotificationSetting.findUnique as jest.Mock).mockResolvedValue(null);
+      (prisma.notificationOutbox.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
+      (prisma.notificationDeliveryAttempt.create as jest.Mock).mockResolvedValue({ id: 'att-wa-fail-closed' });
+
+      const status = await worker.processSingleRecord(record);
+
+      expect(status).toBe(NotificationStatus.FAILED);
+      expect(whatsappProvider.sendWhatsAppMessage).not.toHaveBeenCalled();
+      expect(prisma.notificationOutbox.updateMany).toHaveBeenCalledWith({
+        where: expect.objectContaining({ id: 'outbox-wa-unverified-pref' }),
+        data: expect.objectContaining({
+          status: NotificationStatus.FAILED,
+          lastErrorCode: 'WHATSAPP_TENANT_PREFERENCE_UNVERIFIED',
+        }),
+      });
+    });
+
+    it('marks record as SKIPPED with UNSUPPORTED_NOTIFICATION_CHANNEL if channel is unrecognized', async () => {
+      const record = createSampleOutboxRecord({
+        id: 'outbox-sms-1',
+      });
+      (record as any).channel = 'SMS';
+
+      (prisma.notificationOutbox.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
+      (prisma.notificationDeliveryAttempt.create as jest.Mock).mockResolvedValue({ id: 'att-sms-skip' });
+
+      const status = await worker.processSingleRecord(record);
+
+      expect(status).toBe(NotificationStatus.SKIPPED);
+      expect(whatsappProvider.sendWhatsAppMessage).not.toHaveBeenCalled();
+      expect(emailProvider.sendEmail).not.toHaveBeenCalled();
+      expect(prisma.notificationOutbox.updateMany).toHaveBeenCalledWith({
+        where: expect.objectContaining({ id: 'outbox-sms-1' }),
+        data: expect.objectContaining({
+          status: NotificationStatus.SKIPPED,
+          skipReason: 'UNSUPPORTED_NOTIFICATION_CHANNEL:SMS',
+        }),
+      });
+    });
+
+    it('handles transient WhatsApp provider error with retry scheduling', async () => {
+      const record = createSampleOutboxRecord({
+        id: 'outbox-wa-transient',
+        attemptCount: 1,
+      });
+      (record as any).channel = 'WHATSAPP';
+      (record as any).recipientPhone = '+919876543210';
+
+      const networkError = new Error('getaddrinfo ENOTFOUND graph.facebook.com');
+      (networkError as any).code = 'ENOTFOUND';
+      (whatsappProvider.sendWhatsAppMessage as jest.Mock).mockRejectedValue(networkError);
+
+      (prisma.schoolNotificationSetting.findUnique as jest.Mock).mockResolvedValue({ whatsappEnabled: true });
+      (prisma.notificationOutbox.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
+      (prisma.notificationDeliveryAttempt.create as jest.Mock).mockResolvedValue({ id: 'att-wa-retry' });
+
+      const status = await worker.processSingleRecord(record);
+
+      expect(status).toBe(NotificationStatus.FAILED);
+      expect(prisma.notificationDeliveryAttempt.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          notificationOutboxId: 'outbox-wa-transient',
+          outcome: NotificationStatus.FAILED,
+          errorCode: 'ENOTFOUND',
+          retryScheduled: true,
         }),
       });
     });
