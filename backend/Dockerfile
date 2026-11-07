@@ -55,9 +55,8 @@ RUN addgroup -S appgroup && adduser -S appuser -G appgroup && \
     chown -R appuser:appgroup /var/backups/fee_database /usr/src/app/storage && \
     chmod -R 0750 /var/backups/fee_database /usr/src/app/storage
 
-# Copy production node_modules from builder
+# Copy production node_modules from builder (npm workspaces hoists to root node_modules)
 COPY --from=builder --chown=appuser:appgroup /usr/src/app/node_modules ./node_modules
-COPY --from=builder --chown=appuser:appgroup /usr/src/app/backend/node_modules ./backend/node_modules
 
 # Copy Prisma schema and engines
 COPY --from=builder --chown=appuser:appgroup /usr/src/app/backend/prisma ./backend/prisma
