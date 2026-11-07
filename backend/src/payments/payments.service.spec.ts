@@ -144,6 +144,31 @@ describe('PaymentsService — Payment Collection Engine & Accounting Invariants'
       });
     }
     testFeeHeadId = feeHead.id;
+
+    // 5. Ensure sequence counter starts above any pre-existing receipts in the test DB
+    const maxExisting = await prisma.receipt.aggregate({
+      where: { schoolId: schoolAId, academicYearId: testAcademicYearId },
+      _max: { receiptSequence: true },
+    });
+    if (maxExisting._max.receiptSequence) {
+      await prisma.receiptSequenceCounter.upsert({
+        where: {
+          schoolId_academicYearId: {
+            schoolId: schoolAId,
+            academicYearId: testAcademicYearId,
+          },
+        },
+        update: {
+          nextSequence: maxExisting._max.receiptSequence + 1,
+        },
+        create: {
+          schoolId: schoolAId,
+          academicYearId: testAcademicYearId,
+          prefix: 'RCT',
+          nextSequence: maxExisting._max.receiptSequence + 1,
+        },
+      });
+    }
   });
 
   afterAll(async () => {
@@ -299,8 +324,9 @@ describe('PaymentsService — Payment Collection Engine & Accounting Invariants'
       expect((result.receipt.receiptSnapshot as any).student.id).toBe(testStudentId);
 
       // Verify Allocations sum
-      const totalAllocated = result.allocations.reduce(
-        (sum, a) => sum + Number(a.allocatedAmount || a.amount),
+      const totalAllocated = (result.allocations as any[]).reduce(
+        (sum: number, a: any) =>
+        sum + Number(a.allocatedAmount || a.amount),
         0,
       );
       expect(totalAllocated).toBe(5000);
@@ -3457,7 +3483,7 @@ describe('PaymentsService — Payment Collection Engine & Accounting Invariants'
     });
 
     it('concurrent requests with the same key and payload cannot create duplicate payments, allocations, or receipts', async () => {
-      const inv = await createTestInvoice({ month: 156, grossAmount: 1800 });
+      const inv = await createTestInvoice({ month: 157, grossAmount: 1800 });
       const concurrencyKey = `concur-race-key-${Date.now()}`;
       const payload = {
         studentId: testStudentId,

@@ -47,6 +47,7 @@ export function normalizeEmailError(err: any): EmailProviderError {
   // Classification logic
   if (
     rawCode === 'ECONNRESET' ||
+    rawCode === 'ECONNREFUSED' ||
     rawCode === 'ETIMEDOUT' ||
     rawCode === 'ENOTFOUND' ||
     rawCode === '429' ||

@@ -7,7 +7,14 @@ import { renderRefundFailedEmail } from './refund-failed.template';
 import { renderPaymentPendingEmail } from './payment-pending.template';
 import { renderPaymentFailedEmail } from './payment-failed.template';
 import { renderFeeDueReminderEmail } from './fee-due-reminder.template';
+import { renderStudentAdmittedEmail } from './student-admitted.template';
+import { renderAttendanceAbsentEmail } from './attendance-absent.template';
+import { renderExamScheduleEmail } from './exam-schedule.template';
+import { renderExamResultsEmail } from './exam-results.template';
 import {
+  AttendanceAbsentTemplateData,
+  ExamResultsTemplateData,
+  ExamScheduleTemplateData,
   FeeReminderTemplateData,
   PaymentFailedTemplateData,
   PaymentPendingTemplateData,
@@ -16,6 +23,7 @@ import {
   RefundFailedTemplateData,
   RefundSucceededTemplateData,
   RenderedEmail,
+  StudentAdmittedTemplateData,
 } from './template.types';
 
 @Injectable()
@@ -59,6 +67,7 @@ export class EmailTemplateRenderer {
         rendered = renderPaymentFailedEmail(data as PaymentFailedTemplateData);
         break;
 
+      case NotificationEventType.FEE_DUE_REMINDER:
       case 'FEE_DUE_IN_7_DAYS':
       case 'FEE_DUE_IN_1_DAY':
       case 'FEE_DUE_TODAY':
@@ -69,6 +78,26 @@ export class EmailTemplateRenderer {
       case 'OVERDUE':
       case 'FEE_DUE_REMINDER':
         rendered = renderFeeDueReminderEmail(data as FeeReminderTemplateData);
+        break;
+
+      case NotificationEventType.STUDENT_ADMITTED:
+      case 'STUDENT_ADMITTED':
+        rendered = renderStudentAdmittedEmail(data as StudentAdmittedTemplateData);
+        break;
+
+      case NotificationEventType.ATTENDANCE_ABSENT:
+      case 'ATTENDANCE_ABSENT':
+        rendered = renderAttendanceAbsentEmail(data as AttendanceAbsentTemplateData);
+        break;
+
+      case NotificationEventType.EXAM_SCHEDULE_PUBLISHED:
+      case 'EXAM_SCHEDULE_PUBLISHED':
+        rendered = renderExamScheduleEmail(data as ExamScheduleTemplateData);
+        break;
+
+      case NotificationEventType.EXAM_RESULTS_RELEASED:
+      case 'EXAM_RESULTS_RELEASED':
+        rendered = renderExamResultsEmail(data as ExamResultsTemplateData);
         break;
 
       default:

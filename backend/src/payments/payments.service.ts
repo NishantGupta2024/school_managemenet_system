@@ -4,6 +4,7 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import {
   AllocationType,
@@ -23,6 +24,11 @@ import { ReceiptSequenceService } from './receipt-sequence.service';
 import { ReversalSequenceService } from './reversal-sequence.service';
 import { FeeGenerationService } from '../fee-generation/fee-generation.service';
 import { NotificationOutboxService } from '../notifications/outbox/notification-outbox.service';
+import {
+  ReceiptArtifactService,
+  ReceiptPdfOptions,
+  resolveActiveTemplateVersionForSchool,
+} from '../receipt-templates/receipt-artifact.service';
 import { CollectPaymentDto } from './dto/collect-payment.dto';
 import { ReversePaymentDto } from './dto/reverse-payment.dto';
 import {
@@ -43,6 +49,35 @@ function sortObjectKeys(obj: any): any {
   }
   return sorted;
 }
+
+export const SAFE_RECEIPT_SELECT = {
+  id: true,
+  schoolId: true,
+  academicYearId: true,
+  paymentId: true,
+  receiptNumber: true,
+  receiptSequence: true,
+  issuedDate: true,
+  totalAmount: true,
+  status: true,
+  receiptSnapshot: true,
+  createdAt: true,
+} as const;
+
+export const SAFE_SCHOOL_SELECT = {
+  id: true,
+  name: true,
+  code: true,
+  address: true,
+  city: true,
+  state: true,
+  country: true,
+  currency: true,
+  timezone: true,
+  status: true,
+  createdAt: true,
+  updatedAt: true,
+} as const;
 
 export function computeCanonicalRequestHash(data: any): string {
   // Strip idempotencyKey itself so header vs body doesn't alter the payload hash
@@ -68,6 +103,8 @@ export class PaymentsService {
     private readonly reversalSequenceService: ReversalSequenceService,
     private readonly feeGenerationService: FeeGenerationService,
     private readonly outboxService: NotificationOutboxService,
+    @Optional()
+    private readonly receiptArtifactService?: ReceiptArtifactService,
   ) {}
 
   /**
@@ -187,7 +224,7 @@ export class PaymentsService {
         },
         include: {
           allocations: true,
-          receipt: true,
+          receipt: { select: SAFE_RECEIPT_SELECT },
         },
       });
 
@@ -195,7 +232,11 @@ export class PaymentsService {
         if (existing.requestHash === requestHash) {
           return {
             payment: existing,
-            receipt: existing.receipt,
+            receipt: {
+              ...existing.receipt,
+              templateVersionId:
+                (existing.receipt as any)?.templateVersionId ?? null,
+            },
             allocations: existing.allocations,
             isIdempotentReplay: true,
           };
@@ -218,7 +259,7 @@ export class PaymentsService {
 
     try {
       // 5. Execute complete collection inside a single Prisma interactive transaction
-      return await this.prisma.$transaction(
+      const txResult = await this.prisma.$transaction(
         async (tx) => {
           // Early in-transaction check: return existing replay if already committed
           if (effectiveIdempotencyKey) {
@@ -231,7 +272,7 @@ export class PaymentsService {
               },
               include: {
                 allocations: true,
-                receipt: true,
+                receipt: { select: SAFE_RECEIPT_SELECT },
               },
             });
 
@@ -239,9 +280,15 @@ export class PaymentsService {
               if (earlyExisting.requestHash === requestHash) {
                 return {
                   payment: earlyExisting,
-                  receipt: earlyExisting.receipt,
+                  receipt: {
+                    ...earlyExisting.receipt,
+                    templateVersionId:
+                      (earlyExisting.receipt as any)?.templateVersionId ?? null,
+                  },
                   allocations: earlyExisting.allocations,
                   isIdempotentReplay: true,
+                  selectedTemplateVersionId:
+                    (earlyExisting.receipt as any)?.templateVersionId ?? null,
                 };
               } else {
                 throw new ConflictException(
@@ -273,6 +320,7 @@ export class PaymentsService {
           // C. Fetch School metadata for receipt snapshot
           const school = await tx.school.findUnique({
             where: { id: schoolId },
+            select: SAFE_SCHOOL_SELECT,
           });
           if (!school) {
             throw new NotFoundException(`School ${schoolId} not found`);
@@ -327,7 +375,7 @@ export class PaymentsService {
                 },
                 include: {
                   allocations: true,
-                  receipt: true,
+                  receipt: { select: SAFE_RECEIPT_SELECT },
                 },
               });
 
@@ -336,7 +384,11 @@ export class PaymentsService {
                   return {
                     payment: replayPayment,
                     allocations: replayPayment.allocations,
-                    receipt: replayPayment.receipt,
+                    receipt: {
+                      ...replayPayment.receipt,
+                      templateVersionId:
+                        (replayPayment.receipt as any)?.templateVersionId ?? null,
+                    },
                     isIdempotentReplay: true,
                   };
                 } else {
@@ -374,7 +426,7 @@ export class PaymentsService {
               },
               include: {
                 allocations: true,
-                receipt: true,
+                receipt: { select: SAFE_RECEIPT_SELECT },
               },
             });
 
@@ -382,7 +434,11 @@ export class PaymentsService {
               if (lockedExisting.requestHash === requestHash) {
                 return {
                   payment: lockedExisting,
-                  receipt: lockedExisting.receipt,
+                  receipt: {
+                    ...lockedExisting.receipt,
+                    templateVersionId:
+                      (lockedExisting.receipt as any)?.templateVersionId ?? null,
+                  },
                   allocations: lockedExisting.allocations,
                   isIdempotentReplay: true,
                 };
@@ -687,8 +743,12 @@ export class PaymentsService {
             tx,
           });
 
-          // Generate matching unique paymentNumber
-          const paymentNumber = `PAY-${allocatedReceipt.receiptNumber.replace(/^[A-Z]+-/, '')}`;
+          // Generate matching unique paymentNumber (decoupled from receipt formatting for 100% backward compatibility)
+          const standardYearToken =
+            typeof this.receiptSequenceService?.formatAcademicYearToken === 'function'
+              ? this.receiptSequenceService.formatAcademicYearToken(academicYear.name)
+              : (academicYear.name ? String(academicYear.name).replace(/[^0-9]/g, '').slice(0, 6) : '202627');
+          const paymentNumber = `PAY-${standardYearToken}-${String(allocatedReceipt.sequenceNumber).padStart(5, '0')}`;
 
           // K. Create Payment Master Record
           const payment = await tx.payment.create({
@@ -787,6 +847,18 @@ export class PaymentsService {
             issuedAt: new Date().toISOString(),
           };
 
+          const selectedTemplateVersionId = this.receiptArtifactService
+            ? await this.receiptArtifactService.resolveActiveTemplateVersionId(
+                tx,
+                schoolId,
+                (school as any).defaultReceiptTemplateId ?? null,
+              )
+            : await resolveActiveTemplateVersionForSchool(
+                tx,
+                schoolId,
+                (school as any).defaultReceiptTemplateId ?? null,
+              );
+
           const receipt = await tx.receipt.create({
             data: {
               schoolId,
@@ -797,7 +869,11 @@ export class PaymentsService {
               totalAmount: paymentAmount,
               status: ReceiptStatus.ACTIVE,
               receiptSnapshot,
+              ...(selectedTemplateVersionId
+                ? { templateVersionId: selectedTemplateVersionId }
+                : {}),
             },
+            select: SAFE_RECEIPT_SELECT,
           });
 
           // N. Synchronize Assessed Fine Statuses
@@ -982,6 +1058,7 @@ export class PaymentsService {
             receipt,
             allocations: createdAllocations,
             isIdempotentReplay: false,
+            selectedTemplateVersionId,
           };
         },
         {
@@ -989,6 +1066,40 @@ export class PaymentsService {
           timeout: 15000,
         },
       );
+
+      // 6. Outside the financial transaction: trigger idempotent PDF artifact generation
+      // when an active template version was selected. Failures are recorded and never
+      // roll back the committed payment or receipt.
+      const effectiveTemplateVersionId =
+        (txResult.receipt as any)?.templateVersionId ??
+        (txResult as any).selectedTemplateVersionId ??
+        null;
+
+      if (
+        !txResult.isIdempotentReplay &&
+        effectiveTemplateVersionId &&
+        txResult.receipt?.id &&
+        this.receiptArtifactService
+      ) {
+        try {
+          await this.receiptArtifactService.ensureArtifactForReceipt(
+            schoolId,
+            txResult.receipt.id,
+          );
+        } catch {
+          // Never allow post-commit PDF conversion errors to fail a committed payment
+        }
+      }
+
+      return {
+        payment: txResult.payment,
+        receipt: {
+          ...txResult.receipt,
+          templateVersionId: (txResult as any).selectedTemplateVersionId ?? null,
+        },
+        allocations: txResult.allocations,
+        isIdempotentReplay: txResult.isIdempotentReplay,
+      };
     } catch (err: any) {
       // Catch idempotency race condition: concurrent request with identical idempotency key
       if (
@@ -1005,14 +1116,18 @@ export class PaymentsService {
           },
           include: {
             allocations: true,
-            receipt: true,
+            receipt: { select: SAFE_RECEIPT_SELECT },
           },
         });
         if (existing) {
           if (existing.requestHash === requestHash) {
             return {
               payment: existing,
-              receipt: existing.receipt,
+              receipt: {
+                ...existing.receipt,
+                templateVersionId:
+                  (existing.receipt as any)?.templateVersionId ?? null,
+              },
               allocations: existing.allocations,
               isIdempotentReplay: true,
             };
@@ -1213,7 +1328,7 @@ export class PaymentsService {
                   },
                 },
               },
-              receipt: true,
+              receipt: { select: SAFE_RECEIPT_SELECT },
               refunds: true,
             },
           });
@@ -1438,6 +1553,7 @@ export class PaymentsService {
               await tx.receipt.update({
                 where: { id: payment.receipt.id },
                 data: { status: ReceiptStatus.CANCELLED },
+                select: { id: true, status: true },
               });
             }
           } else if (totalSucceededRefunds.greaterThan(0)) {
@@ -1672,7 +1788,7 @@ export class PaymentsService {
       where: { schoolId_id: { schoolId, id: paymentId } },
       include: {
         allocations: true,
-        receipt: true,
+        receipt: { select: SAFE_RECEIPT_SELECT },
         refunds: true,
       },
     });
@@ -1710,6 +1826,7 @@ export class PaymentsService {
           await tx.receipt.update({
             where: { id: payment.receipt.id },
             data: { status: ReceiptStatus.CANCELLED },
+            select: { id: true, status: true },
           });
         }
       } else {
@@ -1851,7 +1968,7 @@ export class PaymentsService {
                   },
                 },
               },
-              receipt: true,
+              receipt: { select: SAFE_RECEIPT_SELECT },
               refunds: true,
             },
           });
@@ -2444,7 +2561,7 @@ export class PaymentsService {
       this.prisma.payment.findMany({
         where,
         include: {
-          receipt: true,
+          receipt: { select: SAFE_RECEIPT_SELECT },
           student: {
             select: {
               id: true,
@@ -2480,7 +2597,7 @@ export class PaymentsService {
       where: { schoolId_id: { schoolId, id } },
       include: {
         allocations: true,
-        receipt: true,
+        receipt: { select: SAFE_RECEIPT_SELECT },
         student: {
           include: { grade: true, section: true },
         },
@@ -2528,7 +2645,8 @@ export class PaymentsService {
           receiptNumber,
         },
       },
-      include: {
+      select: {
+        ...SAFE_RECEIPT_SELECT,
         payment: {
           include: {
             student: true,
@@ -2541,6 +2659,18 @@ export class PaymentsService {
 
     if (!receipt) {
       throw new NotFoundException(`Receipt ${receiptNumber} not found in this school`);
+    }
+
+    if (!user) {
+      throw new ForbiddenException('Authentication required');
+    }
+
+    if (
+      user.role !== UserRole.PLATFORM_SUPER_ADMIN &&
+      user.schoolId &&
+      user.schoolId !== schoolId
+    ) {
+      throw new ForbiddenException('Access denied to this receipt');
     }
 
     // Role-based authorization
@@ -2560,9 +2690,157 @@ export class PaymentsService {
       if (!relation) {
         throw new ForbiddenException('Access denied to this receipt');
       }
+    } else if (
+      user.role !== UserRole.PLATFORM_SUPER_ADMIN &&
+      user.role !== UserRole.SCHOOL_ADMIN &&
+      user.role !== UserRole.FEE_STAFF
+    ) {
+      throw new ForbiddenException('Access denied to this receipt');
     }
 
     return receipt;
+  }
+
+  /**
+   * Retrieves an authorized receipt by its internal database ID.
+   * Strictly tenant-scoped to schoolId and enforces role access guards.
+   */
+  async findReceiptById(schoolId: string, user: any, receiptId: string) {
+    const receipt = await this.prisma.receipt.findUnique({
+      where: {
+        id: receiptId,
+      },
+      select: {
+        ...SAFE_RECEIPT_SELECT,
+        payment: {
+          include: {
+            student: true,
+            allocations: true,
+          },
+        },
+        academicYear: true,
+      },
+    });
+
+    if (!receipt || receipt.schoolId !== schoolId) {
+      throw new NotFoundException(`Receipt ${receiptId} not found in this school`);
+    }
+
+    if (!user) {
+      throw new ForbiddenException('Authentication required');
+    }
+
+    if (
+      user.role !== UserRole.PLATFORM_SUPER_ADMIN &&
+      user.schoolId &&
+      user.schoolId !== schoolId
+    ) {
+      throw new ForbiddenException('Access denied to this receipt');
+    }
+
+    // Role-based authorization
+    if (user.role === UserRole.STUDENT) {
+      if (receipt.payment?.student?.userId !== user.id) {
+        throw new ForbiddenException('Access denied to this receipt');
+      }
+    } else if (user.role === UserRole.PARENT) {
+      const relation = await this.prisma.parentStudentRelation.findFirst({
+        where: {
+          schoolId,
+          parentId: user.id,
+          studentId: receipt.payment.studentId,
+          isVerified: true,
+        },
+      });
+      if (!relation) {
+        throw new ForbiddenException('Access denied to this receipt');
+      }
+    } else if (
+      user.role !== UserRole.PLATFORM_SUPER_ADMIN &&
+      user.role !== UserRole.SCHOOL_ADMIN &&
+      user.role !== UserRole.FEE_STAFF
+    ) {
+      throw new ForbiddenException('Access denied to this receipt');
+    }
+
+    return receipt;
+  }
+
+  /**
+   * Downloads or reprints an official receipt PDF using the original receipt record
+   * and frozen snapshot. Never allocates a new receipt number.
+   */
+  async downloadReceiptPdf(
+    schoolId: string,
+    user: any,
+    receiptNumber: string,
+    options?: ReceiptPdfOptions,
+  ) {
+    const receipt = await this.findReceiptByNumber(schoolId, user, receiptNumber);
+
+    if (!this.receiptArtifactService) {
+      throw new NotFoundException('Receipt artifact service is not configured');
+    }
+
+    return this.receiptArtifactService.getOrGenerateReceiptPdf(schoolId, receipt, options);
+  }
+
+  /**
+   * Downloads a multi-receipt batch PDF formatted strictly for compact 3-per-page printing.
+   * Scoped to the current tenant and authorized roles. Deduplicates identifiers while
+   * preserving selection order. Never generates or modifies receipt numbers.
+   */
+  async downloadBatchReceiptsPdf(
+    schoolId: string,
+    user: any,
+    identifiers: { receiptNumbers?: string[]; receiptIds?: string[] } | string[],
+    options?: ReceiptPdfOptions,
+  ) {
+    let rawNumbers: string[] = [];
+    let rawIds: string[] = [];
+
+    if (Array.isArray(identifiers)) {
+      rawNumbers = identifiers;
+    } else if (identifiers && typeof identifiers === 'object') {
+      rawNumbers = Array.isArray(identifiers.receiptNumbers) ? identifiers.receiptNumbers : [];
+      rawIds = Array.isArray(identifiers.receiptIds) ? identifiers.receiptIds : [];
+    }
+
+    // Deliberately deduplicate while preserving original order
+    const uniqueNumbers = Array.from(new Set(rawNumbers.filter((n) => typeof n === 'string' && n.trim())));
+    const uniqueIds = Array.from(new Set(rawIds.filter((id) => typeof id === 'string' && id.trim())));
+
+    if (uniqueNumbers.length === 0 && uniqueIds.length === 0) {
+      throw new BadRequestException('At least one receipt identifier is required');
+    }
+
+    if (uniqueNumbers.length + uniqueIds.length > 100) {
+      throw new BadRequestException('Maximum 100 receipts per batch print');
+    }
+
+    // Fetch receipts by numbers or IDs (tenant scoped)
+    const receiptsFromNumbers = await Promise.all(
+      uniqueNumbers.map((rn) => this.findReceiptByNumber(schoolId, user, rn)),
+    );
+    const receiptsFromIds = await Promise.all(
+      uniqueIds.map((id) => this.findReceiptById(schoolId, user, id)),
+    );
+
+    // Merge and deduplicate by receipt id (preserves order)
+    const seenIds = new Set<string>();
+    const receipts: any[] = [];
+    for (const r of [...receiptsFromNumbers, ...receiptsFromIds]) {
+      if (!seenIds.has(r.id)) {
+        seenIds.add(r.id);
+        receipts.push(r);
+      }
+    }
+
+    if (!this.receiptArtifactService) {
+      throw new NotFoundException('Receipt artifact service is not configured');
+    }
+
+    return this.receiptArtifactService.renderBatchReceiptsPdf(schoolId, receipts, options);
   }
 
   /**
@@ -2596,7 +2874,7 @@ export class PaymentsService {
         },
       },
       include: {
-        receipt: true,
+        receipt: { select: SAFE_RECEIPT_SELECT },
       },
     });
 

@@ -21,6 +21,7 @@ import {
   AlertCircle,
   CheckCircle2,
   Printer,
+  Download,
   RotateCcw,
   Undo2,
   Eye,
@@ -462,6 +463,12 @@ export const PaymentsView: React.FC = () => {
 
   // Modals
   const [viewingReceipt, setViewingReceipt] = useState<ReceiptRecord | null>(null);
+  const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
+
+  // Batch Receipt Selection (3 different receipts per A4 page)
+  const [selectedReceiptNumbers, setSelectedReceiptNumbers] = useState<string[]>([]);
+  const [isDownloadingBatch, setIsDownloadingBatch] = useState(false);
+  const [batchError, setBatchError] = useState<string | null>(null);
   const [reversingPayment, setReversingPayment] = useState<PaymentRecord | null>(null);
   const [reversalType, setReversalType] = useState<ReversalType>('VOID');
   const [reversalReason, setReversalReason] = useState('');
@@ -1476,14 +1483,16 @@ export const PaymentsView: React.FC = () => {
       );
 
       if (!releasePending('REVERSAL', activeReversalKey)) {
-      loadHistory();
-      return;
-    }
+        setStatementReloadTick((t) => t + 1);
+        loadHistory();
+        return;
+      }
       setReversingPayment(null);
       setReversalReason('');
       setReversalAttemptFailed(false);
       reversalKeyRef.current = { fingerprint: '', key: '' };
       setReversalIdempotencyKey('');
+      setStatementReloadTick((t) => t + 1);
       loadHistory();
     } catch (err: any) {
       if (isAmbiguousPaymentError(err)) {
@@ -1534,15 +1543,17 @@ export const PaymentsView: React.FC = () => {
       });
 
       if (!releasePending('REVERSAL', activeKey)) {
-      loadHistory();
-      return;
-    }
+        setStatementReloadTick((t) => t + 1);
+        loadHistory();
+        return;
+      }
       setReversingPayment(null);
       setReversalReason('');
       setReversalAttemptFailed(false);
       setHistoryRecoveryMessage(null);
       reversalKeyRef.current = { fingerprint: '', key: '' };
       setReversalIdempotencyKey('');
+      setStatementReloadTick((t) => t + 1);
       loadHistory();
     } catch (err: any) {
       if (isAmbiguousPaymentError(err)) {
@@ -1588,15 +1599,17 @@ export const PaymentsView: React.FC = () => {
       }
       if (res.found && res.operationType === 'REVERSAL') {
         if (!releasePending('REVERSAL', activeKey)) {
-        loadHistory();
-        return;
-      }
+          setStatementReloadTick((t) => t + 1);
+          loadHistory();
+          return;
+        }
         setReversingPayment(null);
         setReversalReason('');
         setReversalAttemptFailed(false);
         setHistoryRecoveryMessage(null);
         reversalKeyRef.current = { fingerprint: '', key: '' };
         setReversalIdempotencyKey('');
+        setStatementReloadTick((t) => t + 1);
         loadHistory();
         return;
       }
@@ -1681,9 +1694,10 @@ export const PaymentsView: React.FC = () => {
       );
 
       if (!releasePending('REFUND', activeRefundKey)) {
-      loadHistory();
-      return;
-    }
+        setStatementReloadTick((t) => t + 1);
+        loadHistory();
+        return;
+      }
       setRefundingPayment(null);
       setRefundAmount('');
       setRefundReason('');
@@ -1691,6 +1705,7 @@ export const PaymentsView: React.FC = () => {
       setRefundAttemptFailed(false);
       refundKeyRef.current = { fingerprint: '', key: '' };
       setRefundIdempotencyKey('');
+      setStatementReloadTick((t) => t + 1);
       loadHistory();
     } catch (err: any) {
       if (isAmbiguousPaymentError(err)) {
@@ -1889,6 +1904,82 @@ export const PaymentsView: React.FC = () => {
     window.print();
   };
 
+  const handleDownloadReceiptPdf = async (layout: 'compact' | 'standard' = 'standard') => {
+    if (!viewingReceipt || isDownloadingPdf) return;
+    try {
+      setIsDownloadingPdf(true);
+      await paymentsApi.downloadReceiptPdf(viewingReceipt.receiptNumber, {
+        layout,
+        copies: 1,
+      });
+    } catch (err: any) {
+      console.error('Failed to download receipt PDF:', err);
+    } finally {
+      setIsDownloadingPdf(false);
+    }
+  };
+
+  const handleDownloadReceipt3Copies = async () => {
+    if (!viewingReceipt || isDownloadingPdf) return;
+    try {
+      setIsDownloadingPdf(true);
+      await paymentsApi.downloadReceiptPdf(viewingReceipt.receiptNumber, {
+        layout: 'compact',
+        copies: 3,
+      });
+    } catch (err: any) {
+      console.error('Failed to download 3-copy voucher PDF:', err);
+    } finally {
+      setIsDownloadingPdf(false);
+    }
+  };
+
+  const handleToggleSelectReceipt = (receiptNumber: string) => {
+    setSelectedReceiptNumbers((prev) =>
+      prev.includes(receiptNumber)
+        ? prev.filter((rn) => rn !== receiptNumber)
+        : [...prev, receiptNumber],
+    );
+  };
+
+  const handleSelectAllReceiptsOnPage = () => {
+    const eligibleReceiptNumbers = payments
+      .map((p) => p.receipt?.receiptNumber)
+      .filter((rn): rn is string => Boolean(rn));
+
+    const allSelected =
+      eligibleReceiptNumbers.length > 0 &&
+      eligibleReceiptNumbers.every((rn) => selectedReceiptNumbers.includes(rn));
+
+    if (allSelected) {
+      setSelectedReceiptNumbers((prev) =>
+        prev.filter((rn) => !eligibleReceiptNumbers.includes(rn)),
+      );
+    } else {
+      setSelectedReceiptNumbers((prev) =>
+        Array.from(new Set([...prev, ...eligibleReceiptNumbers])),
+      );
+    }
+  };
+
+  const handleDownloadSelectedBatchPdf = async () => {
+    if (selectedReceiptNumbers.length === 0 || isDownloadingBatch) return;
+    try {
+      setIsDownloadingBatch(true);
+      setBatchError(null);
+      await paymentsApi.downloadBatchReceiptsPdf(selectedReceiptNumbers, {
+        layout: 'compact',
+      });
+    } catch (err: any) {
+      console.error('Failed to download batch receipts PDF:', err);
+      setBatchError(
+        err?.response?.data?.message || 'Failed to download selected receipts PDF',
+      );
+    } finally {
+      setIsDownloadingBatch(false);
+    }
+  };
+
   const getStatusBadge = (status: PaymentStatus) => {
     switch (status) {
       case 'COMPLETED':
@@ -2022,6 +2113,7 @@ export const PaymentsView: React.FC = () => {
                     return;
                   }
                   setActiveSubTab('collect');
+                  setStatementReloadTick((t) => t + 1);
                 }}
                 className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
                   activeSubTab === 'collect'
@@ -2474,11 +2566,36 @@ export const PaymentsView: React.FC = () => {
                             )}
                           </div>
                           <div className="text-right">
-                            <span className="font-mono font-bold text-slate-900 block">
-                              {formatCurrency(invBalance)}
-                            </span>
+                            {inv.status === 'PAID' ? (
+                              <>
+                                <span className="font-mono font-bold text-emerald-700 block">
+                                  {formatCurrency(inv.paidAmount ?? (inv.netAmount + (inv.assessedFineAmount ?? 0)))}
+                                </span>
+                                <span className="text-[10px] text-emerald-600 font-medium block">
+                                  Paid in Full (₹0 due)
+                                </span>
+                              </>
+                            ) : inv.status === 'PARTIALLY_PAID' ? (
+                              <>
+                                <span className="font-mono font-bold text-indigo-700 block">
+                                  {formatCurrency(invBalance)}
+                                </span>
+                                <span className="text-[10px] text-slate-500 block">
+                                  Due (of {formatCurrency(inv.netAmount + (inv.assessedFineAmount ?? 0))})
+                                </span>
+                              </>
+                            ) : (
+                              <>
+                                <span className="font-mono font-bold text-slate-900 block">
+                                  {formatCurrency(invBalance)}
+                                </span>
+                                <span className="text-[10px] text-slate-400 block">
+                                  Balance Due
+                                </span>
+                              </>
+                            )}
                             <span
-                              className={`text-[9px] font-bold uppercase px-1.5 py-0.5 rounded ${
+                              className={`inline-block text-[9px] font-bold uppercase px-1.5 py-0.5 rounded mt-0.5 ${
                                 inv.status === 'PAID'
                                   ? 'bg-emerald-100 text-emerald-800'
                                   : inv.status === 'PARTIALLY_PAID'
@@ -2777,6 +2894,61 @@ export const PaymentsView: React.FC = () => {
             </div>
           </div>
 
+          {/* Batch Selection Action Bar */}
+          {selectedReceiptNumbers.length > 0 && (
+            <div
+              data-testid="receipt-batch-action-bar"
+              className="p-3.5 bg-emerald-50 border border-emerald-200 rounded-2xl flex flex-wrap items-center justify-between gap-3 animate-in fade-in duration-150"
+            >
+              <div className="flex items-center gap-2.5">
+                <div className="w-6 h-6 rounded-full bg-emerald-600 text-white flex items-center justify-center text-xs font-bold">
+                  {selectedReceiptNumbers.length}
+                </div>
+                <div>
+                  <span className="text-xs font-bold text-emerald-950">
+                    {selectedReceiptNumbers.length} {selectedReceiptNumbers.length === 1 ? 'receipt' : 'receipts'} selected
+                  </span>
+                  <span className="text-[11px] text-emerald-700 block sm:inline sm:ml-2">
+                    (Prints 3 different receipts per A4 page)
+                  </span>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleDownloadSelectedBatchPdf}
+                  disabled={isDownloadingBatch}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 transition-colors shadow-xs disabled:opacity-50"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  {isDownloadingBatch
+                    ? 'Generating Batch PDF...'
+                    : `Download Selected Receipts (3 per Page)`}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSelectedReceiptNumbers([])}
+                  className="px-3 py-2 rounded-xl text-xs font-semibold text-slate-600 bg-white hover:bg-slate-100 border border-slate-200 transition-colors"
+                >
+                  Clear Selection
+                </button>
+              </div>
+            </div>
+          )}
+
+          {batchError && (
+            <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-center justify-between">
+              <span>{batchError}</span>
+              <button
+                type="button"
+                onClick={() => setBatchError(null)}
+                className="text-rose-600 hover:text-rose-800 font-bold ml-2"
+              >
+                ✕
+              </button>
+            </div>
+          )}
+
           {/* Payments Table */}
           <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
             {historyLoading ? (
@@ -2796,6 +2968,20 @@ export const PaymentsView: React.FC = () => {
                 <table className="w-full text-left border-collapse text-xs">
                   <thead>
                     <tr className="bg-slate-50/80 border-b border-slate-200/80 text-slate-600 font-semibold uppercase tracking-wider">
+                      <th className="py-3 px-3 w-10 text-center">
+                        <input
+                          type="checkbox"
+                          aria-label="Select all receipts on page"
+                          checked={
+                            payments.some((p) => p.receipt?.receiptNumber) &&
+                            payments
+                              .filter((p) => p.receipt?.receiptNumber)
+                              .every((p) => selectedReceiptNumbers.includes(p.receipt!.receiptNumber))
+                          }
+                          onChange={handleSelectAllReceiptsOnPage}
+                          className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 cursor-pointer"
+                        />
+                      </th>
                       <th className="py-3 px-4">Receipt # / Ref</th>
                       <th className="py-3 px-4">Date</th>
                       <th className="py-3 px-4">Student</th>
@@ -2806,9 +2992,30 @@ export const PaymentsView: React.FC = () => {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 text-slate-700">
-                    {payments.map((p) => (
-                      <tr key={p.id} className="hover:bg-slate-50/60 transition-colors">
-                        <td className="py-3 px-4">
+                    {payments.map((p) => {
+                      const hasReceipt = Boolean(p.receipt?.receiptNumber);
+                      const isSelected = hasReceipt && selectedReceiptNumbers.includes(p.receipt!.receiptNumber);
+                      return (
+                        <tr
+                          key={p.id}
+                          className={`transition-colors ${
+                            isSelected ? 'bg-emerald-50/40 hover:bg-emerald-50/60' : 'hover:bg-slate-50/60'
+                          }`}
+                        >
+                          <td className="py-3 px-3 text-center">
+                            {hasReceipt ? (
+                              <input
+                                type="checkbox"
+                                aria-label={`Select receipt ${p.receipt!.receiptNumber}`}
+                                checked={isSelected}
+                                onChange={() => handleToggleSelectReceipt(p.receipt!.receiptNumber)}
+                                className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 cursor-pointer"
+                              />
+                            ) : (
+                              <span className="text-slate-300">-</span>
+                            )}
+                          </td>
+                          <td className="py-3 px-4">
                           <button
                             type="button"
                             onClick={() => {
@@ -2955,7 +3162,8 @@ export const PaymentsView: React.FC = () => {
                           </div>
                         </td>
                       </tr>
-                    ))}
+                    );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -3074,6 +3282,10 @@ export const PaymentsView: React.FC = () => {
         >
           <style>{`
             @media print {
+              @page {
+                size: A4 portrait;
+                margin: 8mm;
+              }
               header, nav, footer, [data-print-hide-when-receipt="true"] {
                 display: none !important;
               }
@@ -3087,6 +3299,25 @@ export const PaymentsView: React.FC = () => {
                 <h3 className="text-base font-bold text-slate-900">Official Fee Receipt</h3>
               </div>
               <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleDownloadReceiptPdf('standard')}
+                  disabled={isDownloadingPdf}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 transition-colors disabled:opacity-50"
+                  title="Download Official PDF Receipt"
+                >
+                  <Download className="w-3.5 h-3.5 text-emerald-700" />
+                  {isDownloadingPdf ? 'Generating PDF...' : 'Download PDF'}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDownloadReceipt3Copies}
+                  disabled={isDownloadingPdf}
+                  className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-600 bg-slate-50 hover:bg-slate-100 border border-slate-200 transition-colors disabled:opacity-50"
+                  title="Download 3 duplicate copies (Student, Office, Accounts) on one A4 sheet"
+                >
+                  3-Copy Voucher
+                </button>
                 <button
                   type="button"
                   onClick={handlePrint}

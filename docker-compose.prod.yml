@@ -1,0 +1,171 @@
+services:
+  # ----------------------------------------------------------------------------
+  # 1. PostgreSQL 18 Database Engine
+  # ----------------------------------------------------------------------------
+  postgres:
+    image: postgres:18-alpine
+    container_name: fee_prod_postgres
+    restart: always
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-fee_production}
+      POSTGRES_USER: ${POSTGRES_USER:-fee_app_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Database password is required}
+    volumes:
+      - postgres_data:/var/lib/postgresql
+      - backup_data:/var/backups/fee_database
+    networks:
+      - internal_backend
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-fee_app_user} -d ${POSTGRES_DB:-fee_production}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    # Note: No public ports exposed; PostgreSQL communicates strictly on internal_backend
+
+  # ----------------------------------------------------------------------------
+  # 2. Redis 7 Cache & Atomic Distributed Rate Limiter
+  # ----------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: fee_prod_redis
+    restart: always
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:?Redis password is required}", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    networks:
+      - internal_backend
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:?Redis password is required}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    # Note: No public ports exposed; Redis communicates strictly on internal_backend
+
+  # ----------------------------------------------------------------------------
+  # 3. NestJS Backend Application
+  # ----------------------------------------------------------------------------
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: fee_prod_backend
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      API_PREFIX: /api/v1
+      DATABASE_URL: postgresql://${POSTGRES_USER:-fee_app_user}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-fee_production}?schema=public&sslmode=disable&connection_limit=25
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      JWT_SECRET: ${JWT_SECRET:?JWT secret is required}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-15m}
+      JWT_REFRESH_EXPIRES_IN: ${JWT_REFRESH_EXPIRES_IN:-7d}
+      GATEWAY_ENCRYPTION_KEY: ${GATEWAY_ENCRYPTION_KEY:?Gateway encryption key is required}
+      ALLOW_LIVE_PAYMENT_GATEWAY: ${ALLOW_LIVE_PAYMENT_GATEWAY:-false}
+      EMAIL_PROVIDER: ${EMAIL_PROVIDER:-smtp}
+      SMTP_HOST: ${SMTP_HOST:-live.smtp.mailtrap.io}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_SECURE: ${SMTP_SECURE:-false}
+      SMTP_REQUIRE_TLS: ${SMTP_REQUIRE_TLS:-true}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      EMAIL_FROM_ADDRESS: ${EMAIL_FROM_ADDRESS:-notifications@mail.school.internal}
+      EMAIL_DEFAULT_FROM_NAME: ${EMAIL_DEFAULT_FROM_NAME:-School Fee Management System}
+      NOTIFICATION_WORKER_ENABLED: ${NOTIFICATION_WORKER_ENABLED:-false}
+      FEE_REMINDER_SCHEDULER_ENABLED: ${FEE_REMINDER_SCHEDULER_ENABLED:-false}
+      DATABASE_BACKUP_DIRECTORY: /var/backups/fee_database
+      DATABASE_BACKUP_ENCRYPTION_KEY: ${DATABASE_BACKUP_ENCRYPTION_KEY:-}
+      APP_STORAGE_PATH: /usr/src/app/storage
+      RECEIPT_STORAGE_PATH: /usr/src/app/storage
+      EXAMINATION_STORAGE_PATH: /usr/src/app/storage
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost}
+    # NOTE ON STORAGE TOPOLOGY:
+    # `app_storage_data` is a named local Docker volume that persists receipt DOCX templates,
+    # generated PDF receipt artifacts, and examination question images across container restarts
+    # on a single host node. For multi-node horizontal scaling (>1 backend host), replace with
+    # an S3-compatible object storage adapter or shared POSIX filesystem (e.g., AWS EFS / NFS).
+    volumes:
+      - backup_data:/var/backups/fee_database
+      - app_storage_data:/usr/src/app/storage
+    networks:
+      - internal_backend
+      - internal_frontend
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/api/v1/health/ready || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    # Note: Backend port 3000 is routed strictly via Nginx; not exposed directly to the host
+
+  # ----------------------------------------------------------------------------
+  # 4. React/Vite Frontend Application (SPA Static Distribution)
+  # ----------------------------------------------------------------------------
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    container_name: fee_prod_frontend
+    restart: always
+    networks:
+      - internal_frontend
+    # Note: Frontend port 8080 is routed strictly via Nginx; not exposed directly to the host
+
+  # ----------------------------------------------------------------------------
+  # 5. Nginx Production Reverse Proxy & Gateway Router
+  # ----------------------------------------------------------------------------
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: fee_prod_nginx
+    restart: always
+    depends_on:
+      - backend
+      - frontend
+    ports:
+      - "${HTTP_PORT:-80}:80"
+    volumes:
+      - ./docker/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    networks:
+      - internal_frontend
+      - public_ingress
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost/nginx-health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+# ------------------------------------------------------------------------------
+# Persistent Volume Definitions
+# ------------------------------------------------------------------------------
+volumes:
+  postgres_data:
+    name: fee_prod_postgres_data
+  redis_data:
+    name: fee_prod_redis_data
+  backup_data:
+    name: fee_prod_backup_data
+  app_storage_data:
+    name: fee_prod_app_storage_data
+
+# ------------------------------------------------------------------------------
+# Private Network Topologies
+# ------------------------------------------------------------------------------
+networks:
+  # Internal data tier: only PostgreSQL, Redis, and Backend
+  internal_backend:
+    name: fee_prod_internal_backend
+    internal: true
+  # Internal application tier: Backend, Frontend, and Nginx
+  internal_frontend:
+    name: fee_prod_internal_frontend
+    internal: true
+  # Public ingress tier: Only Nginx connects to host network
+  public_ingress:
+    name: fee_prod_public_ingress

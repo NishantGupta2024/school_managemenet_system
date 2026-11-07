@@ -13,6 +13,7 @@ import {
 import { StudentAllocationsService } from './student-allocations.service';
 import { CreateStudentAllocationDto } from './dto/create-student-allocation.dto';
 import { UpdateStudentAllocationDto } from './dto/update-student-allocation.dto';
+import { BulkStudentAllocationDto } from './dto/bulk-student-allocation.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { TenantGuard } from '../common/tenant/tenant.guard';
 import { RolesGuard } from '../common/auth/roles.guard';
@@ -30,6 +31,14 @@ export class StudentAllocationsController {
     const schoolId = req.school.id;
     const currentUserId = req.user.id;
     return this.studentAllocationsService.create(schoolId, currentUserId, createDto);
+  }
+
+  @Post('bulk')
+  @Roles(UserRole.PLATFORM_SUPER_ADMIN, UserRole.SCHOOL_ADMIN)
+  async bulkCreate(@Request() req: any, @Body() bulkDto: BulkStudentAllocationDto) {
+    const schoolId = req.school.id;
+    const currentUserId = req.user.id;
+    return this.studentAllocationsService.bulkCreate(schoolId, currentUserId, bulkDto);
   }
 
   @Get()

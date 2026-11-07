@@ -64,7 +64,15 @@ describe('TenantGuard (Unit / Mocked)', () => {
 
     expect(result).toBe(true);
     expect(req.school).toEqual(activeSchool);
-    expect(prismaMock.school.findUnique).toHaveBeenCalledWith({ where: { id: validSchoolId } });
+    expect(prismaMock.school.findUnique).toHaveBeenCalledWith({
+      where: { id: validSchoolId },
+      select: {
+        id: true,
+        name: true,
+        code: true,
+        status: true,
+      },
+    });
   });
 
   it('4. should throw ForbiddenException if regular user has no schoolId', async () => {

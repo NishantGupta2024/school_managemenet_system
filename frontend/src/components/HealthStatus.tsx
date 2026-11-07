@@ -93,7 +93,7 @@ export const HealthStatus: React.FC = () => {
         <div className="p-4 rounded-xl border border-slate-200 bg-slate-50/50 flex flex-col justify-between">
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Database Tier</span>
-            {health?.database.status === 'connected' ? (
+            {health?.database?.status === 'connected' || health?.status === 'ok' ? (
               <Database className="w-5 h-5 text-emerald-600" />
             ) : (
               <XCircle className="w-5 h-5 text-rose-500" />
@@ -102,20 +102,20 @@ export const HealthStatus: React.FC = () => {
           <div className="mt-4">
             <div className="text-base font-bold text-slate-800">PostgreSQL 18 + Prisma</div>
             <div className="text-xs text-slate-500 mt-1">
-              Latency: {health?.database.latencyMs !== undefined ? `${health.database.latencyMs} ms` : 'N/A'}
+              Latency: {health?.database?.latencyMs !== undefined ? `${health.database.latencyMs} ms` : 'N/A'}
             </div>
           </div>
           <div className="mt-4 pt-3 border-t border-slate-200/60 flex items-center justify-between text-xs">
             <span className="text-slate-500">Prisma Status</span>
-            <span className={`font-semibold ${health?.database.status === 'connected' ? 'text-emerald-700' : 'text-amber-600'}`}>
-              {health?.database.status || 'Pending'}
+            <span className={`font-semibold ${health?.database?.status === 'connected' || health?.status === 'ok' ? 'text-emerald-700' : 'text-amber-600'}`}>
+              {health?.database?.status || (health?.status === 'ok' ? 'connected' : 'Pending')}
             </span>
           </div>
         </div>
       </div>
 
       {/* Database Entity Counts (Phase 1 Baseline) */}
-      {health && (
+      {health?.database && (
         <div className="mt-6 p-4 rounded-xl bg-slate-50 border border-slate-200">
           <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider mb-3">
             Database Seed & Tenant Isolation Telemetry
@@ -170,7 +170,7 @@ export const HealthStatus: React.FC = () => {
           <span className="inline-block w-2 h-2 rounded-full bg-emerald-500"></span>
           <span>Active Request School ID:</span>
           <code className="bg-slate-100 px-1.5 py-0.5 rounded font-mono text-slate-700">
-            {health?.tenantContext.activeSchoolId || DEFAULT_TENANT_ID}
+            {health?.tenantContext?.activeSchoolId || DEFAULT_TENANT_ID}
           </code>
         </div>
         <div>

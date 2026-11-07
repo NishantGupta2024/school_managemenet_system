@@ -5,6 +5,7 @@ import {
   Navigate,
   BrowserRouter,
   useInRouterContext,
+  useNavigate,
 } from 'react-router-dom';
 import { Header } from './components/Header';
 import { HealthStatus } from './components/HealthStatus';
@@ -17,16 +18,26 @@ import { ExcelImportView } from './components/ExcelImportView';
 import { FineConfigurationView } from './components/FineConfigurationView';
 import { FeeReportsView } from './components/FeeReportsView';
 import { PaymentsView } from './components/PaymentsView';
+import { SchoolsView } from './components/SchoolsView';
+import { UsersView } from './components/UsersView';
+import { PaymentGatewaySettingsView } from './components/PaymentGatewaySettingsView';
+import { ReceiptSettingsView } from './components/ReceiptSettingsView';
+import { NotificationSettingsView } from './components/NotificationSettingsView';
+import { AcademicSetupView } from './components/AcademicSetupView';
+import { StudentsManagementView } from './components/StudentsManagementView';
+import { TeachersManagementView } from './components/TeachersManagementView';
+import { AttendanceManagementWorkspace } from './components/AttendanceManagementWorkspace';
+import { ExaminationWorkspace } from './components/ExaminationWorkspace';
+import { MainLauncherDashboard } from './components/MainLauncherDashboard';
+import { PublicWebsiteView } from './components/PublicWebsiteView';
 import { LoginView } from './components/LoginView';
 import { ProtectedRoute } from './components/ProtectedRoute';
+import { TenantContextGate } from './components/TenantContextGate';
 import { AuthProvider, useAuth, useOptionalAuth } from './context/AuthContext';
 import { UserRole } from './services/api';
 import {
-  CheckCircle,
   Shield,
   Layers,
-  Database,
-  Lock,
   Activity,
   Tag,
   UserCheck,
@@ -34,13 +45,19 @@ import {
   FileText,
   FileSpreadsheet,
   Scale,
-  Building,
+  Building2,
   BarChart3,
   CreditCard,
+  Users,
+  GraduationCap,
+  ArrowLeft,
+  Lock,
+  Bell,
 } from 'lucide-react';
 
-export type ActiveTab =
+export type ActiveFeeTab =
   | 'overview'
+  | 'payments'
   | 'fee-heads'
   | 'fee-structures'
   | 'student-allocations'
@@ -49,20 +66,27 @@ export type ActiveTab =
   | 'excel-imports'
   | 'fine-configuration'
   | 'reports'
-  | 'payments';
+  | 'receipt-settings'
+  | 'payment-gateway'
+  | 'notifications';
 
-interface TabDefinition {
-  id: ActiveTab;
+interface FeeTabDefinition {
+  id: ActiveFeeTab;
   label: string;
   icon: React.ReactNode;
   allowedRoles?: UserRole[];
 }
 
-const ALL_TABS: TabDefinition[] = [
+const ALL_FEE_TABS: FeeTabDefinition[] = [
   {
     id: 'overview',
     label: 'Overview & Health',
     icon: <Activity className="w-4 h-4" />,
+  },
+  {
+    id: 'payments',
+    label: 'Payments & Receipts',
+    icon: <CreditCard className="w-4 h-4 text-emerald-600" />,
   },
   {
     id: 'fee-heads',
@@ -112,356 +136,738 @@ const ALL_TABS: TabDefinition[] = [
     allowedRoles: [UserRole.PLATFORM_SUPER_ADMIN, UserRole.SCHOOL_ADMIN, UserRole.FEE_STAFF],
   },
   {
-    id: 'payments',
-    label: 'Payments & Receipts',
-    icon: <CreditCard className="w-4 h-4 text-emerald-600" />,
+    id: 'receipt-settings',
+    label: 'Receipt Settings',
+    icon: <FileText className="w-4 h-4 text-indigo-600" />,
+    allowedRoles: [UserRole.PLATFORM_SUPER_ADMIN, UserRole.SCHOOL_ADMIN],
+  },
+  {
+    id: 'payment-gateway',
+    label: 'Payment Gateway',
+    icon: <CreditCard className="w-4 h-4 text-purple-600" />,
+    allowedRoles: [UserRole.PLATFORM_SUPER_ADMIN, UserRole.SCHOOL_ADMIN],
+  },
+  {
+    id: 'notifications',
+    label: 'Notifications',
+    icon: <Bell className="w-4 h-4 text-amber-600" />,
+    allowedRoles: [UserRole.PLATFORM_SUPER_ADMIN, UserRole.SCHOOL_ADMIN],
   },
 ];
 
-export const DashboardView: React.FC = () => {
-  const { user, selectedSchoolId, setSelectedSchoolId } = useAuth();
-  const [activeTab, setActiveTab] = useState<ActiveTab>('overview');
-  const [superAdminSchoolInput, setSuperAdminSchoolInput] = useState('');
+// =========================================================================
+// 1. Fee Management Workspace
+// =========================================================================
+export const FeeManagementWorkspace: React.FC = () => {
+  const navigate = useNavigate();
+  const { user } = useAuth();
+  const [activeTab, setActiveTab] = useState<ActiveFeeTab>('overview');
 
-  // Filter tabs according to authenticated user role
-  const accessibleTabs = ALL_TABS.filter((tab) => {
+  // Filter tabs by role
+  const accessibleTabs = ALL_FEE_TABS.filter((tab) => {
     if (!user || !user.role || !tab.allowedRoles) return true;
     return tab.allowedRoles.includes(user.role);
   });
 
-  const canAccess = (tabId: ActiveTab) => {
+  const canAccess = (tabId: ActiveFeeTab) => {
     return accessibleTabs.some((t) => t.id === tabId);
   };
 
-  // If the active tab is not in accessible tabs, redirect to overview
   useEffect(() => {
     if (!accessibleTabs.some((t) => t.id === activeTab)) {
       setActiveTab('overview');
     }
   }, [accessibleTabs, activeTab]);
 
-  const isPlatformSuperAdmin = user?.role === UserRole.PLATFORM_SUPER_ADMIN;
-  const isSchoolContextMissing = isPlatformSuperAdmin && !selectedSchoolId && activeTab !== 'overview';
+  return (
+    <div className="space-y-6">
+      {/* Module Workspace Navigation Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => navigate('/app')}
+            className="p-2 border border-slate-200 hover:bg-slate-50 text-slate-600 rounded-xl transition-colors flex items-center gap-1.5 text-xs font-semibold"
+            title="Return to System Launcher"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            <span>All Systems</span>
+          </button>
+          <div className="h-6 w-px bg-slate-200 hidden sm:block" />
+          <div className="flex items-center gap-2">
+            <div className="p-2 bg-emerald-50 text-emerald-600 rounded-xl border border-emerald-100">
+              <CreditCard className="w-5 h-5" />
+            </div>
+            <div>
+              <h2 className="text-base font-bold text-slate-900 tracking-tight leading-tight">
+                Fee Management Workspace
+              </h2>
+              <span className="text-[11px] text-slate-400 font-medium">
+                Invoicing, allocations, payments, receipts, and financial statements
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <button
+          onClick={() => navigate('/app')}
+          className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 transition-colors self-end sm:self-auto"
+        >
+          System Launcher →
+        </button>
+      </div>
+
+      {/* Fee Module Tabs */}
+      <div className="bg-white border border-slate-200 rounded-2xl shadow-xs overflow-hidden">
+        <nav className="flex space-x-1 overflow-x-auto p-1.5 bg-slate-50/50">
+          {accessibleTabs.map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={`flex items-center gap-2 py-2.5 px-3.5 rounded-xl font-medium text-xs whitespace-nowrap transition-all ${
+                activeTab === tab.id
+                  ? 'bg-white text-indigo-700 font-bold shadow-xs border border-slate-200/60'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+              }`}
+            >
+              {tab.icon}
+              {tab.label}
+            </button>
+          ))}
+        </nav>
+      </div>
+
+      {/* Tab Contents */}
+      <>
+        {activeTab === 'overview' && (
+          <div className="space-y-6">
+            <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white rounded-3xl p-6 sm:p-8 shadow-xl">
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-white/10 backdrop-blur border border-white/20 text-indigo-200 mb-4">
+                <Shield className="w-3.5 h-3.5 text-indigo-300" />
+                Fee Engine & Financial Ledger Active
+              </span>
+              <h2 className="text-2xl sm:text-3xl font-extrabold tracking-tight">
+                Fee Management Workspace
+              </h2>
+              <p className="mt-2 text-indigo-100 text-sm leading-relaxed max-w-2xl">
+                Automated monthly invoicing, cashier collections, receipt numbering, online gateway settlement, and real-time student statements.
+              </p>
+              <div className="mt-6 flex flex-wrap gap-2">
+                <button
+                  onClick={() => setActiveTab('payments')}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold bg-white text-slate-900 hover:bg-slate-100 transition-colors shadow-sm"
+                >
+                  <CreditCard className="w-3.5 h-3.5 text-emerald-600" />
+                  Payments & Receipts Desk
+                </button>
+                {canAccess('fee-heads') && (
+                  <button
+                    onClick={() => setActiveTab('fee-heads')}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold bg-white/10 hover:bg-white/20 text-white border border-white/20 transition-colors"
+                  >
+                    <Tag className="w-3.5 h-3.5 text-indigo-200" />
+                    Fee Heads
+                  </button>
+                )}
+                {canAccess('fee-structures') && (
+                  <button
+                    onClick={() => setActiveTab('fee-structures')}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold bg-white/10 hover:bg-white/20 text-white border border-white/20 transition-colors"
+                  >
+                    <Layers className="w-3.5 h-3.5 text-indigo-200" />
+                    Fee Structures
+                  </button>
+                )}
+              </div>
+            </div>
+            <HealthStatus />
+          </div>
+        )}
+
+        {activeTab === 'payments' && <PaymentsView />}
+        {activeTab === 'fee-heads' && <FeeHeadsView />}
+        {activeTab === 'fee-structures' && <FeeStructuresView />}
+        {activeTab === 'student-allocations' && <StudentAllocationsView />}
+        {activeTab === 'fee-generation' && <FeeGenerationView />}
+        {activeTab === 'student-statements' && <StudentStatementView />}
+        {activeTab === 'excel-imports' && <ExcelImportView />}
+        {activeTab === 'fine-configuration' && <FineConfigurationView />}
+        {activeTab === 'reports' && <FeeReportsView />}
+        {activeTab === 'receipt-settings' && <ReceiptSettingsView />}
+        {activeTab === 'payment-gateway' && <PaymentGatewaySettingsView />}
+        {activeTab === 'notifications' && <NotificationSettingsView />}
+      </>
+    </div>
+  );
+};
+
+// =========================================================================
+// 2. Student Management Workspace
+// =========================================================================
+export const StudentManagementWorkspace: React.FC = () => {
+  const navigate = useNavigate();
+  const { user } = useAuth();
+
+  const isAuthorized =
+    user?.role === UserRole.PLATFORM_SUPER_ADMIN ||
+    user?.role === UserRole.SCHOOL_ADMIN ||
+    user?.role === UserRole.FEE_STAFF;
+
+  if (!isAuthorized) {
+    return (
+      <div className="bg-white rounded-3xl border border-slate-200 p-8 text-center max-w-lg mx-auto my-12 space-y-4">
+        <div className="p-3 bg-rose-50 text-rose-600 rounded-2xl w-fit mx-auto">
+          <Lock className="w-8 h-8" />
+        </div>
+        <h3 className="text-lg font-bold text-slate-800">Access Restricted</h3>
+        <p className="text-xs text-slate-500">
+          Your authenticated role ({user?.role}) is not authorized to access Student Admissions & Management.
+        </p>
+        <button
+          onClick={() => navigate('/app')}
+          className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-semibold"
+        >
+          ← Return to System Launcher
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Top Workspace Navigation Bar */}
+      <div className="flex items-center justify-between bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => navigate('/app')}
+            className="p-2 border border-slate-200 hover:bg-slate-50 text-slate-600 rounded-xl transition-colors flex items-center gap-1.5 text-xs font-semibold"
+            title="Return to System Launcher"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            <span>All Systems</span>
+          </button>
+          <div className="h-6 w-px bg-slate-200 hidden sm:block" />
+          <div className="flex items-center gap-2">
+            <div className="p-2 bg-indigo-50 text-indigo-600 rounded-xl border border-indigo-100">
+              <Users className="w-5 h-5" />
+            </div>
+            <div>
+              <h2 className="text-base font-bold text-slate-900 tracking-tight leading-tight">
+                Student Management Workspace
+              </h2>
+              <span className="text-[11px] text-slate-400 font-medium">
+                Authoritative institutional directory, admissions, and profile statements
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <button
+          onClick={() => navigate('/app')}
+          className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 transition-colors"
+        >
+          System Launcher →
+        </button>
+      </div>
+
+      <StudentsManagementView />
+    </div>
+  );
+};
+
+// =========================================================================
+// 3. Academic Setup Workspace
+// =========================================================================
+export const AcademicSetupWorkspace: React.FC = () => {
+  const navigate = useNavigate();
+  const { user } = useAuth();
+
+  const isAuthorized =
+    user?.role === UserRole.PLATFORM_SUPER_ADMIN || user?.role === UserRole.SCHOOL_ADMIN;
+
+  if (!isAuthorized) {
+    return (
+      <div className="bg-white rounded-3xl border border-slate-200 p-8 text-center max-w-lg mx-auto my-12 space-y-4">
+        <div className="p-3 bg-rose-50 text-rose-600 rounded-2xl w-fit mx-auto">
+          <Lock className="w-8 h-8" />
+        </div>
+        <h3 className="text-lg font-bold text-slate-800">Access Restricted</h3>
+        <p className="text-xs text-slate-500">
+          Your authenticated role ({user?.role}) is not authorized to access Academic Setup & Session Configuration.
+        </p>
+        <button
+          onClick={() => navigate('/app')}
+          className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-semibold"
+        >
+          ← Return to System Launcher
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Top Workspace Navigation Bar */}
+      <div className="flex items-center justify-between bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => navigate('/app')}
+            className="p-2 border border-slate-200 hover:bg-slate-50 text-slate-600 rounded-xl transition-colors flex items-center gap-1.5 text-xs font-semibold"
+            title="Return to System Launcher"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            <span>All Systems</span>
+          </button>
+          <div className="h-6 w-px bg-slate-200 hidden sm:block" />
+          <div className="flex items-center gap-2">
+            <div className="p-2 bg-purple-50 text-purple-600 rounded-xl border border-purple-100">
+              <GraduationCap className="w-5 h-5" />
+            </div>
+            <div>
+              <h2 className="text-base font-bold text-slate-900 tracking-tight leading-tight">
+                Academic Setup & Governance
+              </h2>
+              <span className="text-[11px] text-slate-400 font-medium">
+                Academic session lifecycles, grade levels, and section allocations
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <button
+          onClick={() => navigate('/app')}
+          className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 transition-colors"
+        >
+          System Launcher →
+        </button>
+      </div>
+
+      <AcademicSetupView />
+    </div>
+  );
+};
+
+// =========================================================================
+// 4. User Accounts Workspace
+// =========================================================================
+export const UserManagementWorkspace: React.FC = () => {
+  const navigate = useNavigate();
+  const { user } = useAuth();
+
+  const isAuthorized =
+    user?.role === UserRole.PLATFORM_SUPER_ADMIN || user?.role === UserRole.SCHOOL_ADMIN;
+
+  if (!isAuthorized) {
+    return (
+      <div className="bg-white rounded-3xl border border-slate-200 p-8 text-center max-w-lg mx-auto my-12 space-y-4">
+        <div className="p-3 bg-rose-50 text-rose-600 rounded-2xl w-fit mx-auto">
+          <Lock className="w-8 h-8" />
+        </div>
+        <h3 className="text-lg font-bold text-slate-800">Access Restricted</h3>
+        <p className="text-xs text-slate-500">
+          User account management is restricted to School Administrators and Super Administrators.
+        </p>
+        <button
+          onClick={() => navigate('/app')}
+          className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-semibold"
+        >
+          ← Return to System Launcher
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => navigate('/app')}
+            className="p-2 border border-slate-200 hover:bg-slate-50 text-slate-600 rounded-xl transition-colors flex items-center gap-1.5 text-xs font-semibold"
+            title="Return to System Launcher"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            <span>All Systems</span>
+          </button>
+          <div className="h-6 w-px bg-slate-200 hidden sm:block" />
+          <div className="flex items-center gap-2">
+            <div className="p-2 bg-indigo-50 text-indigo-600 rounded-xl border border-indigo-100">
+              <Lock className="w-5 h-5" />
+            </div>
+            <div>
+              <h2 className="text-base font-bold text-slate-900 tracking-tight leading-tight">
+                User Accounts & Access Management
+              </h2>
+              <span className="text-[11px] text-slate-400 font-medium">
+                Fee staff accounts, student portal credentials, and parent-student linkages
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <button
+          onClick={() => navigate('/app')}
+          className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 transition-colors"
+        >
+          System Launcher →
+        </button>
+      </div>
+
+      <UsersView />
+    </div>
+  );
+};
+
+// =========================================================================
+// 4b. Notification & Communications Workspace
+// =========================================================================
+export const NotificationManagementWorkspace: React.FC = () => {
+  const navigate = useNavigate();
+  const { user } = useAuth();
+
+  const isAuthorized =
+    user?.role === UserRole.PLATFORM_SUPER_ADMIN || user?.role === UserRole.SCHOOL_ADMIN;
+
+  if (!isAuthorized) {
+    return (
+      <div className="bg-white rounded-3xl border border-slate-200 p-8 text-center max-w-lg mx-auto my-12 space-y-4">
+        <div className="p-3 bg-rose-50 text-rose-600 rounded-2xl w-fit mx-auto">
+          <Lock className="w-8 h-8" />
+        </div>
+        <h3 className="text-lg font-bold text-slate-800">Access Restricted</h3>
+        <p className="text-xs text-slate-500">
+          Notification settings and delivery logs are restricted to School Administrators and Super Administrators.
+        </p>
+        <button
+          onClick={() => navigate('/app')}
+          className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-semibold"
+        >
+          ← Return to System Launcher
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => navigate('/app')}
+            className="p-2 border border-slate-200 hover:bg-slate-50 text-slate-600 rounded-xl transition-colors flex items-center gap-1.5 text-xs font-semibold"
+            title="Return to System Launcher"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            <span>All Systems</span>
+          </button>
+          <div className="h-6 w-px bg-slate-200 hidden sm:block" />
+          <div className="flex items-center gap-2">
+            <div className="p-2 bg-amber-50 text-amber-600 rounded-xl border border-amber-100">
+              <Bell className="w-5 h-5" />
+            </div>
+            <div>
+              <h2 className="text-base font-bold text-slate-900 tracking-tight leading-tight">
+                Notifications & Communications
+              </h2>
+              <span className="text-[11px] text-slate-400 font-medium">
+                Automated email alerts, notification preferences, delivery logs, and channel status
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <button
+          onClick={() => navigate('/app')}
+          className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 transition-colors"
+        >
+          System Launcher →
+        </button>
+      </div>
+
+      <NotificationSettingsView />
+    </div>
+  );
+};
+
+// =========================================================================
+// 5. Platform Admin Workspace
+// =========================================================================
+export const PlatformAdminWorkspace: React.FC = () => {
+  const navigate = useNavigate();
+  const { user } = useAuth();
+
+  if (user?.role !== UserRole.PLATFORM_SUPER_ADMIN) {
+    return (
+      <div className="bg-white rounded-3xl border border-slate-200 p-8 text-center max-w-lg mx-auto my-12 space-y-4">
+        <div className="p-3 bg-rose-50 text-rose-600 rounded-2xl w-fit mx-auto">
+          <Lock className="w-8 h-8" />
+        </div>
+        <h3 className="text-lg font-bold text-slate-800">Platform Super Admin Only</h3>
+        <p className="text-xs text-slate-500">
+          This workspace is restricted exclusively to Root Platform Super Administrators.
+        </p>
+        <button
+          onClick={() => navigate('/app')}
+          className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-semibold"
+        >
+          ← Return to System Launcher
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => navigate('/app')}
+            className="p-2 border border-slate-200 hover:bg-slate-50 text-slate-600 rounded-xl transition-colors flex items-center gap-1.5 text-xs font-semibold"
+            title="Return to System Launcher"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            <span>All Systems</span>
+          </button>
+          <div className="h-6 w-px bg-slate-200 hidden sm:block" />
+          <div className="flex items-center gap-2">
+            <div className="p-2 bg-amber-50 text-amber-600 rounded-xl border border-amber-100">
+              <Building2 className="w-5 h-5" />
+            </div>
+            <div>
+              <h2 className="text-base font-bold text-slate-900 tracking-tight leading-tight">
+                Platform Administration
+              </h2>
+              <span className="text-[11px] text-slate-400 font-medium">
+                Global school tenant directory, school onboarding, and system health
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <button
+          onClick={() => navigate('/app')}
+          className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 transition-colors"
+        >
+          System Launcher →
+        </button>
+      </div>
+
+      <SchoolsView />
+    </div>
+  );
+};
+
+// =========================================================================
+// 6. Teacher Management Workspace
+// =========================================================================
+export const TeacherManagementWorkspace: React.FC = () => {
+  const navigate = useNavigate();
+  const { user } = useAuth();
+
+  const isAuthorized =
+    user?.role === UserRole.PLATFORM_SUPER_ADMIN ||
+    user?.role === UserRole.SCHOOL_ADMIN ||
+    user?.role === UserRole.FEE_STAFF ||
+    user?.role === UserRole.TEACHER;
+
+  if (!isAuthorized) {
+    return (
+      <div className="bg-white rounded-3xl border border-slate-200 p-8 text-center max-w-lg mx-auto my-12 space-y-4">
+        <div className="p-3 bg-rose-50 text-rose-600 rounded-2xl w-fit mx-auto">
+          <Lock className="w-8 h-8" />
+        </div>
+        <h3 className="text-lg font-bold text-slate-800">Access Restricted</h3>
+        <p className="text-xs text-slate-500">
+          Your authenticated role ({user?.role}) is not authorized to access Teacher & Staff Management.
+        </p>
+        <button
+          onClick={() => navigate('/app')}
+          className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-semibold"
+        >
+          ← Return to System Launcher
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Top Workspace Navigation Bar */}
+      <div className="flex items-center justify-between bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => navigate('/app')}
+            className="p-2 border border-slate-200 hover:bg-slate-50 text-slate-600 rounded-xl transition-colors flex items-center gap-1.5 text-xs font-semibold"
+            title="Return to System Launcher"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            <span>All Systems</span>
+          </button>
+          <div className="h-6 w-px bg-slate-200 hidden sm:block" />
+          <div className="flex items-center gap-2">
+            <div className="p-2 bg-teal-50 text-teal-600 rounded-xl border border-teal-100">
+              <GraduationCap className="w-5 h-5" />
+            </div>
+            <div>
+              <h2 className="text-base font-bold text-slate-900 tracking-tight leading-tight">
+                Teacher & Staff Management
+              </h2>
+              <span className="text-[11px] text-slate-400 font-medium">
+                Faculty directory, classroom assignments, designations, and portal provisioning
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <button
+          onClick={() => navigate('/app')}
+          className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 transition-colors"
+        >
+          System Launcher →
+        </button>
+      </div>
+
+      <TeachersManagementView />
+    </div>
+  );
+};
+
+export { AttendanceManagementWorkspace } from './components/AttendanceManagementWorkspace';
+export { ExaminationWorkspace } from './components/ExaminationWorkspace';
+
+// =========================================================================
+// 7. ERP Workspace Shell (Protected Shell for /app/*)
+// =========================================================================
+export const ERPWorkspaceShell: React.FC = () => {
+  const { user, selectedSchoolId } = useAuth();
+  const tenantKey = user?.role === UserRole.PLATFORM_SUPER_ADMIN ? (selectedSchoolId || 'no-tenant') : 'tenant';
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col font-sans">
       <Header />
 
-      {/* Platform Super Admin Tenant Switcher */}
-      {isPlatformSuperAdmin && (
-        <div className="bg-amber-50 border-b border-amber-200 px-6 py-3">
-          <div className="max-w-7xl mx-auto flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs text-amber-900">
-            <div className="flex items-center gap-2">
-              <span className="font-semibold px-2 py-0.5 bg-amber-200 text-amber-800 rounded">
-                Platform Super Admin
-              </span>
-              <span>
-                Backend school directory API pending. Specify a target School ID (UUID) for school-level operations:
-              </span>
-            </div>
-            <div className="flex items-center gap-2">
-              <input
-                type="text"
-                value={superAdminSchoolInput}
-                onChange={(e) => setSuperAdminSchoolInput(e.target.value)}
-                placeholder="Target School UUID"
-                aria-label="Target School UUID"
-                className="px-3 py-1 bg-white border border-amber-300 rounded text-xs focus:ring-1 focus:ring-amber-500 focus:outline-none w-64 font-mono"
-              />
-              <button
-                type="button"
-                onClick={() => {
-                  if (superAdminSchoolInput.trim()) {
-                    setSelectedSchoolId(superAdminSchoolInput.trim());
-                  }
-                }}
-                className="px-3 py-1 bg-amber-700 hover:bg-amber-800 text-white rounded font-medium transition-colors"
-              >
-                Set Context
-              </button>
-              {selectedSchoolId && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSuperAdminSchoolInput('');
-                    setSelectedSchoolId(null);
-                  }}
-                  className="px-2 py-1 bg-amber-100 hover:bg-amber-200 text-amber-800 rounded transition-colors"
-                >
-                  Clear ({selectedSchoolId.slice(0, 8)}...)
-                </button>
-              )}
-            </div>
-          </div>
+      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-6 sm:py-8">
+        <div key={tenantKey} className="w-full">
+          <Routes>
+            <Route index element={<MainLauncherDashboard />} />
+            <Route path="dashboard" element={<MainLauncherDashboard />} />
+            <Route
+              path="fees/*"
+              element={
+                <TenantContextGate moduleName="Fee Management" moduleDescription="Invoicing, allocations, payments, receipts, and financial statements operate strictly on active school tenant records.">
+                  <FeeManagementWorkspace />
+                </TenantContextGate>
+              }
+            />
+            <Route
+              path="students/*"
+              element={
+                <TenantContextGate moduleName="Student Directory & Admissions" moduleDescription="Student records, profiles, and institutional enrollments require an active school tenant.">
+                  <StudentManagementWorkspace />
+                </TenantContextGate>
+              }
+            />
+            <Route
+              path="teachers/*"
+              element={
+                <TenantContextGate moduleName="Teacher & Staff Management" moduleDescription="Faculty rosters, departmental assignments, and class allocations require an active school tenant.">
+                  <TeacherManagementWorkspace />
+                </TenantContextGate>
+              }
+            />
+            <Route
+              path="attendance/*"
+              element={
+                <TenantContextGate moduleName="Attendance Management" moduleDescription="Daily student roll-call registers and section attendance require an active school tenant.">
+                  <AttendanceManagementWorkspace />
+                </TenantContextGate>
+              }
+            />
+            <Route
+              path="examinations/*"
+              element={
+                <TenantContextGate moduleName="Examinations & Grading" moduleDescription="MCQ question authoring, student quizzes, and test evaluations require an active school tenant.">
+                  <ExaminationWorkspace />
+                </TenantContextGate>
+              }
+            />
+            <Route
+              path="academics/*"
+              element={
+                <TenantContextGate moduleName="Academic Setup & Governance" moduleDescription="Academic sessions, grade classes, and classroom sections require an active school tenant.">
+                  <AcademicSetupWorkspace />
+                </TenantContextGate>
+              }
+            />
+            <Route
+              path="users/*"
+              element={
+                <TenantContextGate moduleName="User Accounts & Access" moduleDescription="Institutional staff credentials, student portals, and parent links require an active school tenant.">
+                  <UserManagementWorkspace />
+                </TenantContextGate>
+              }
+            />
+            <Route
+              path="notifications/*"
+              element={
+                <TenantContextGate moduleName="Notifications & Communications" moduleDescription="Institutional email notification preferences, delivery audit logs, and communication channels require an active school tenant.">
+                  <NotificationManagementWorkspace />
+                </TenantContextGate>
+              }
+            />
+            <Route path="admin/*" element={<PlatformAdminWorkspace />} />
+            <Route path="*" element={<Navigate to="/app" replace />} />
+          </Routes>
         </div>
-      )}
-
-      {/* Navigation Tabs */}
-      <div className="bg-white border-b border-slate-200 sticky top-[73px] z-20 shadow-xs">
-        <div className="max-w-7xl mx-auto px-6">
-          <nav className="flex space-x-1 sm:space-x-8 overflow-x-auto py-2">
-            {accessibleTabs.map((tab) => (
-              <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
-                className={`flex items-center gap-2 py-3 px-3.5 border-b-2 font-medium text-sm whitespace-nowrap transition-colors ${
-                  activeTab === tab.id
-                    ? 'border-indigo-600 text-indigo-600 font-semibold'
-                    : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
-                }`}
-              >
-                {tab.icon}
-                {tab.label}
-              </button>
-            ))}
-          </nav>
-        </div>
-      </div>
-
-      <main className="flex-1 max-w-7xl w-full mx-auto px-6 py-8">
-        {isSchoolContextMissing ? (
-          <div className="bg-white rounded-2xl border border-amber-200 shadow-sm p-8 text-center max-w-xl mx-auto my-12">
-            <Building className="w-12 h-12 text-amber-500 mx-auto mb-4" />
-            <h3 className="text-lg font-bold text-slate-800 mb-2">Target School Context Required</h3>
-            <p className="text-sm text-slate-600 mb-4">
-              As a Platform Super Admin without a fixed tenant, please input a target School UUID in the context bar above before accessing school-scoped data.
-            </p>
-            <button
-              onClick={() => setActiveTab('overview')}
-              className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg transition-colors"
-            >
-              Return to Overview & System Health
-            </button>
-          </div>
-        ) : (
-          <>
-            {/* Tab 1: Overview & Health */}
-            {activeTab === 'overview' && (
-              <div>
-                {/* Phase Banner */}
-                <div className="bg-gradient-to-r from-brand-900 via-indigo-900 to-slate-900 text-white rounded-3xl p-8 shadow-xl mb-8 relative overflow-hidden">
-                  <div className="relative z-10 max-w-3xl">
-                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-white/10 backdrop-blur border border-white/20 text-indigo-200 mb-4">
-                      <Shield className="w-3.5 h-3.5 text-indigo-300" />
-                      Phase 1 Architecture Foundation Completed
-                    </span>
-                    <h2 className="text-3xl font-extrabold tracking-tight">
-                      School Fee Management System
-                    </h2>
-                    <p className="mt-2 text-indigo-100 text-sm leading-relaxed">
-                      Clean architecture foundation configured with NestJS 11, React 18, PostgreSQL 18, and Prisma ORM.
-                      Multi-tenancy context isolation via <code className="bg-white/20 px-1 py-0.5 rounded text-white font-mono text-xs">AsyncLocalStorage</code> is operational and verified.
-                    </p>
-                    <div className="mt-4 flex flex-wrap gap-2">
-                      {canAccess('fee-heads') && (
-                        <button
-                          onClick={() => setActiveTab('fee-heads')}
-                          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold bg-white text-slate-900 hover:bg-slate-100 transition-colors shadow-sm"
-                        >
-                          <Tag className="w-3.5 h-3.5 text-indigo-600" />
-                          Manage Fee Heads
-                        </button>
-                      )}
-                      {canAccess('fee-structures') && (
-                        <button
-                          onClick={() => setActiveTab('fee-structures')}
-                          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold bg-indigo-600/80 hover:bg-indigo-600 text-white border border-indigo-400/30 transition-colors"
-                        >
-                          <Layers className="w-3.5 h-3.5 text-indigo-200" />
-                          Class Fee Structures
-                        </button>
-                      )}
-                      {canAccess('student-allocations') && (
-                        <button
-                          onClick={() => setActiveTab('student-allocations')}
-                          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold bg-indigo-600/80 hover:bg-indigo-600 text-white border border-indigo-400/30 transition-colors"
-                        >
-                          <UserCheck className="w-3.5 h-3.5 text-indigo-200" />
-                          Assign Students
-                        </button>
-                      )}
-                      {canAccess('fee-generation') && (
-                        <button
-                          onClick={() => setActiveTab('fee-generation')}
-                          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold bg-indigo-500 hover:bg-indigo-400 text-white transition-colors"
-                        >
-                          <Sparkles className="w-3.5 h-3.5 text-white" />
-                          Generate Invoices
-                        </button>
-                      )}
-                      {canAccess('student-statements') && (
-                        <button
-                          onClick={() => setActiveTab('student-statements')}
-                          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white transition-colors"
-                        >
-                          <FileText className="w-3.5 h-3.5 text-white" />
-                          Fee Statements
-                        </button>
-                      )}
-                      {canAccess('excel-imports') && (
-                        <button
-                          onClick={() => setActiveTab('excel-imports')}
-                          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white transition-colors"
-                        >
-                          <FileSpreadsheet className="w-3.5 h-3.5 text-white" />
-                          Excel Import
-                        </button>
-                      )}
-                      {canAccess('fine-configuration') && (
-                        <button
-                          onClick={() => setActiveTab('fine-configuration')}
-                          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold bg-amber-600 hover:bg-amber-500 text-white transition-colors"
-                        >
-                          <Scale className="w-3.5 h-3.5 text-white" />
-                          Fine Configuration
-                        </button>
-                      )}
-                      {canAccess('reports') && (
-                        <button
-                          onClick={() => setActiveTab('reports')}
-                          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold bg-blue-600 hover:bg-blue-500 text-white transition-colors shadow-sm"
-                        >
-                          <BarChart3 className="w-3.5 h-3.5 text-white" />
-                          Fee Reports
-                        </button>
-                      )}
-                      {canAccess('payments') && (
-                        <button
-                          onClick={() => setActiveTab('payments')}
-                          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white transition-colors shadow-sm"
-                        >
-                          <CreditCard className="w-3.5 h-3.5 text-white" />
-                          Payments & Receipts
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Live System Health */}
-                <div className="mb-8">
-                  <HealthStatus />
-                </div>
-
-                {/* Phase 1 & 2 Verification Checklist */}
-                <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
-                  <h3 className="text-base font-bold text-slate-900 mb-4 flex items-center gap-2">
-                    <CheckCircle className="w-5 h-5 text-emerald-600" />
-                    Phase Foundation & Fee Engine Deliverables
-                  </h3>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="flex items-start gap-3 p-4 rounded-xl border border-slate-100 bg-slate-50/50">
-                      <div className="p-2 rounded-lg bg-indigo-50 text-indigo-600">
-                        <Layers className="w-5 h-5" />
-                      </div>
-                      <div>
-                        <h4 className="text-sm font-semibold text-slate-800">Clean Monorepo Workspace</h4>
-                        <p className="text-xs text-slate-500 mt-0.5">
-                          Decoupled <code className="font-mono">backend</code> and <code className="font-mono">frontend</code> packages with unified npm workspace scripts.
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="flex items-start gap-3 p-4 rounded-xl border border-slate-100 bg-slate-50/50">
-                      <div className="p-2 rounded-lg bg-emerald-50 text-emerald-600">
-                        <Lock className="w-5 h-5" />
-                      </div>
-                      <div>
-                        <h4 className="text-sm font-semibold text-slate-800">Tenant Context Isolation</h4>
-                        <p className="text-xs text-slate-500 mt-0.5">
-                          AsyncLocalStorage middleware automatically propagates <code className="font-mono">schoolId</code> across asynchronous execution chains.
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="flex items-start gap-3 p-4 rounded-xl border border-slate-100 bg-slate-50/50">
-                      <div className="p-2 rounded-lg bg-amber-50 text-amber-600">
-                        <Database className="w-5 h-5" />
-                      </div>
-                      <div>
-                        <h4 className="text-sm font-semibold text-slate-800">Fee Configuration Tier (Phase 2B)</h4>
-                        <p className="text-xs text-slate-500 mt-0.5">
-                          Master Fee Heads, Class Structures with frequencies (Monthly/Annual/One-Time), and Student Fee Allocations with exact concession semantics.
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="flex items-start gap-3 p-4 rounded-xl border border-slate-100 bg-slate-50/50">
-                      <div className="p-2 rounded-lg bg-purple-50 text-purple-600">
-                        <Sparkles className="w-5 h-5" />
-                      </div>
-                      <div>
-                        <h4 className="text-sm font-semibold text-slate-800">Monthly Invoicing Engine (Phase 2C)</h4>
-                        <p className="text-xs text-slate-500 mt-0.5">
-                          12-Month schedule generator (April–March), atomic generation with idempotency, dynamic status derivation, and itemized fee statements.
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Tab 2: Fee Heads */}
-            {activeTab === 'fee-heads' && <FeeHeadsView />}
-
-            {/* Tab 3: Fee Structures */}
-            {activeTab === 'fee-structures' && <FeeStructuresView />}
-
-            {/* Tab 4: Student Allocations */}
-            {activeTab === 'student-allocations' && <StudentAllocationsView />}
-
-            {/* Tab 5: Monthly Fee Generation */}
-            {activeTab === 'fee-generation' && <FeeGenerationView />}
-
-            {/* Tab 6: Student Fee Statements */}
-            {activeTab === 'student-statements' && <StudentStatementView />}
-
-            {/* Tab 7: Excel Data Imports */}
-            {activeTab === 'excel-imports' && <ExcelImportView />}
-
-            {/* Tab 8: Fine Configuration */}
-            {activeTab === 'fine-configuration' && <FineConfigurationView />}
-
-            {/* Tab 9: Fee Reports */}
-            {activeTab === 'reports' && <FeeReportsView />}
-
-            {/* Tab 10: Fee Payments & Receipts */}
-            {activeTab === 'payments' && <PaymentsView />}
-          </>
-        )}
       </main>
 
       <footer className="bg-white border-t border-slate-200 py-4 px-6 text-center text-xs text-slate-500">
-        School Fee Management System • Phase 2D Fine Configuration & Late Fine Rules Engine • Multi-Tenant Enterprise Architecture
+        School ERP Unified Platform • Multi-Tenant Enterprise Monolith Architecture
       </footer>
     </div>
   );
 };
 
-const LoginRouteWrapper: React.FC = () => {
+// =========================================================================
+// 8. Route Wrappers
+// =========================================================================
+export const PublicWebsiteRoute: React.FC = () => {
   const { isAuthenticated, isLoading } = useAuth();
-
   if (!isLoading && isAuthenticated) {
-    return <Navigate to="/" replace />;
+    return <Navigate to="/app" replace />;
   }
+  return <PublicWebsiteView />;
+};
 
+export const LoginRouteWrapper: React.FC = () => {
+  const { isAuthenticated, isLoading } = useAuth();
+  if (!isLoading && isAuthenticated) {
+    return <Navigate to="/app" replace />;
+  }
   return <LoginView />;
 };
 
 export const AppRoutes: React.FC = () => {
   return (
     <Routes>
+      {/* 1. Public Main Website */}
+      <Route path="/" element={<PublicWebsiteRoute />} />
+
+      {/* 2. Authentication Login */}
       <Route path="/login" element={<LoginRouteWrapper />} />
+
+      {/* 3. Protected Unified School ERP System */}
       <Route
-        path="/*"
+        path="/app/*"
         element={
           <ProtectedRoute>
-            <DashboardView />
+            <ERPWorkspaceShell />
           </ProtectedRoute>
         }
       />
+
+      {/* Legacy Fallbacks */}
+      <Route path="/dashboard" element={<Navigate to="/app" replace />} />
+      <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
 };

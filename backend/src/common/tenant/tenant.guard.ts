@@ -64,6 +64,12 @@ export class TenantGuard implements CanActivate {
     // Verify tenant exists and is ACTIVE in database
     const school = await this.prisma.school.findUnique({
       where: { id: targetSchoolId },
+      select: {
+        id: true,
+        name: true,
+        code: true,
+        status: true,
+      },
     });
 
     if (!school) {

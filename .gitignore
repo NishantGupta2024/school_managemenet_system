@@ -10,9 +10,10 @@ coverage/
 
 # Environment variables
 .env
-.env.local
-.env.*.local
+.env.*
 !.env.example
+!backend/.env.example
+!backend/.env.production.example
 
 # Logs
 logs/
@@ -39,3 +40,23 @@ Thumbs.db
 # Prisma
 backend/prisma/*.db
 backend/prisma/*.db-journal
+
+# Database Backups and Disaster Recovery
+backups/
+tmp_drill_data/
+*.dump
+*.dump.enc
+*.sql.gz
+drill_metrics.json
+
+# Runtime Storage
+storage/
+backend/storage/
+
+# Python
+__pycache__/
+*.py[cod]
+
+# Backup Files
+*.bak
+*.backup

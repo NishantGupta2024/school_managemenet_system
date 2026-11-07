@@ -1,6 +1,11 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
-import { PrismaClient, UserRole } from '@prisma/client';
+import {
+  BadRequestException,
+  ForbiddenException,
+  InternalServerErrorException,
+  NotFoundException,
+} from '@nestjs/common';
+import { AcademicYearFormat, PrismaClient, UserRole } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../common/tenant/tenant-context.service';
 import { ReceiptSequenceService } from './receipt-sequence.service';
@@ -62,6 +67,22 @@ describe('ReceiptSequenceService — Atomic Receipt Sequence Engine', () => {
       },
     });
     sessionA2Id = sessionA2.id;
+
+    // 4. Mock schoolReceiptNumberConfig on prisma to simulate table existing with default config
+    (prisma as any).schoolReceiptNumberConfig = {
+      findUnique: jest.fn().mockResolvedValue(null),
+    };
+
+    const origTransaction = prisma.$transaction.bind(prisma);
+    prisma.$transaction = (async (cb: any, opts?: any) => {
+      if (typeof cb === 'function') {
+        return origTransaction(async (tx: any) => {
+          tx.schoolReceiptNumberConfig = { findUnique: jest.fn().mockResolvedValue(null) };
+          return cb(tx);
+        }, opts);
+      }
+      return origTransaction(cb, opts);
+    }) as any;
   });
 
   beforeEach(async () => {
@@ -361,5 +382,141 @@ describe('ReceiptSequenceService — Atomic Receipt Sequence Engine', () => {
     });
     expect(retryAlloc.sequenceNumber).toBe(2);
     expect(retryAlloc.receiptNumber).toBe('RCT-202627-00002');
+  });
+
+  // -------------------------------------------------------------
+  // Test 11: Format options & custom separator allocation
+  // -------------------------------------------------------------
+  it('11. should allocate receipts matching full format matrix', async () => {
+    // A. FULL_8DIGIT with slash separator
+    const r1 = await service.allocateNextReceiptNumber({
+      schoolId: schoolAId,
+      academicYearId: sessionAId,
+      prefix: 'DPMS',
+      yearFormat: AcademicYearFormat.FULL_8DIGIT,
+      paddingDigits: 6,
+      separator: '/',
+    });
+    expect(r1.receiptNumber).toBe('DPMS/20262027/000001');
+
+    // B. START_YEAR_4DIGIT with hyphen
+    const r2 = await service.allocateNextReceiptNumber({
+      schoolId: schoolAId,
+      academicYearId: sessionAId,
+      prefix: 'ABC',
+      yearFormat: AcademicYearFormat.START_YEAR_4DIGIT,
+      paddingDigits: 4,
+      separator: '-',
+    });
+    expect(r2.receiptNumber).toBe('ABC-2026-0002');
+
+    // C. NONE yearFormat without year token
+    const r3 = await service.allocateNextReceiptNumber({
+      schoolId: schoolAId,
+      academicYearId: sessionAId,
+      prefix: 'FEE',
+      yearFormat: AcademicYearFormat.NONE,
+      paddingDigits: 5,
+      separator: '-',
+    });
+    expect(r3.receiptNumber).toBe('FEE-00003');
+
+    // D. Empty separator
+    const r4 = await service.allocateNextReceiptNumber({
+      schoolId: schoolAId,
+      academicYearId: sessionAId,
+      prefix: 'RCT',
+      yearFormat: AcademicYearFormat.SHORT_6DIGIT,
+      paddingDigits: 5,
+      separator: '',
+    });
+    expect(r4.receiptNumber).toBe('RCT20262700004');
+  });
+
+  // -------------------------------------------------------------
+  // Test 12: Rule 2 - Cross-academic-year uniqueness when yearFormat = NONE
+  // -------------------------------------------------------------
+  it('12. should guarantee cross-academic-year receiptNumber uniqueness when yearFormat is NONE', async () => {
+    await prisma.receiptSequenceCounter.deleteMany({
+      where: { schoolId: schoolAId },
+    });
+
+    // 1. Session 2026-2027 under NONE format allocates next safe sequence
+    const s1 = await service.allocateNextReceiptNumber({
+      schoolId: schoolAId,
+      academicYearId: sessionAId,
+      prefix: 'GEN',
+      yearFormat: AcademicYearFormat.NONE,
+      paddingDigits: 4,
+      separator: '-',
+    });
+    expect(s1.sequenceNumber).toBeGreaterThanOrEqual(1);
+    expect(s1.receiptNumber).toMatch(/^GEN-\d{4}$/);
+
+    // Simulate receipts table reflecting s1.sequenceNumber as the highest issued sequence
+    const originalAggregate = prisma.receipt.aggregate;
+    prisma.receipt.aggregate = jest.fn().mockResolvedValue({
+      _max: { receiptSequence: s1.sequenceNumber },
+    });
+
+    // 2. Session 2027-2028 initialized for the same school under NONE format
+    // Must NOT restart at 1 or collide with s1
+    await prisma.receiptSequenceCounter.deleteMany({
+      where: { schoolId: schoolAId, academicYearId: sessionA2Id },
+    });
+
+    const s2 = await service.allocateNextReceiptNumber({
+      schoolId: schoolAId,
+      academicYearId: sessionA2Id,
+      prefix: 'GEN',
+      yearFormat: AcademicYearFormat.NONE,
+      paddingDigits: 4,
+      separator: '-',
+    });
+
+    // Sequence strictly continues after s1, guaranteeing distinct receipt numbers
+    expect(s2.sequenceNumber).toBe(s1.sequenceNumber + 1);
+    expect(s2.receiptNumber).not.toBe(s1.receiptNumber);
+
+    // Restore original mock
+    prisma.receipt.aggregate = originalAggregate;
+  });
+
+  // -------------------------------------------------------------
+  // Test 13: Rule 1 - Safeguard against silent fallback on DB errors
+  // -------------------------------------------------------------
+  it('13. Rule 1 Safeguard: should throw InternalServerErrorException when config resolution encounters unexpected DB error', async () => {
+    const brokenDb = {
+      ...prisma,
+      schoolReceiptNumberConfig: {
+        findUnique: jest.fn().mockRejectedValue(new Error('Connection broken / database failure')),
+      },
+    };
+
+    await expect(
+      service.resolveSchoolReceiptConfig(schoolAId, brokenDb as any),
+    ).rejects.toThrow(InternalServerErrorException);
+  });
+
+  // -------------------------------------------------------------
+  // Test 14: Counter continuity when prefix changes mid-stream
+  // -------------------------------------------------------------
+  it('14. should continue counter monotonically from N to N+1 when prefix changes mid-stream', async () => {
+    const first = await service.allocateNextReceiptNumber({
+      schoolId: schoolAId,
+      academicYearId: sessionAId,
+      prefix: 'OLD',
+    });
+    expect(first.sequenceNumber).toBe(1);
+    expect(first.receiptNumber).toBe('OLD-202627-00001');
+
+    // Change prefix to NEW without resetting sequence
+    const second = await service.allocateNextReceiptNumber({
+      schoolId: schoolAId,
+      academicYearId: sessionAId,
+      prefix: 'NEW',
+    });
+    expect(second.sequenceNumber).toBe(2);
+    expect(second.receiptNumber).toBe('NEW-202627-00002');
   });
 });

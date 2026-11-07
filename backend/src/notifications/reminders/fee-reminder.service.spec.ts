@@ -1,8 +1,16 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { InvoiceStatus, PaymentStatus, Prisma } from '@prisma/client';
+import {
+  AllocationType,
+  AssessedFineStatus,
+  InvoiceStatus,
+  PaymentStatus,
+  Prisma,
+  RefundStatus,
+} from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
   FeeReminderService,
+  computeAuthoritativeInvoiceBalance,
   formatDateInTimezone,
   getCalendarDayDiff,
 } from './fee-reminder.service';
@@ -549,6 +557,313 @@ describe('FeeReminderService', () => {
         // Ensure raw milestone is preserved inside templateData
         expect(rawQueryStrings).toContain(m.expectedMilestone);
       }
+    });
+  });
+
+  describe('FIN-02 — Authoritative Financial Ledger Balance & Overdue Remediation', () => {
+    const referenceDate = new Date('2026-10-20T10:00:00Z'); // 2026-10-20 in Asia/Kolkata
+
+    const createBaseInvoice = (overrides: any = {}) => ({
+      id: 'inv-fin02-1',
+      schoolId: mockSchoolId,
+      studentId: 'student-1',
+      academicYearId: 'ay-1',
+      billingMonth: 7,
+      dueDate: new Date('2026-10-15T00:00:00+05:30'), // 5 days OVERDUE
+      grossAmount: new Prisma.Decimal(10000),
+      discountAmount: new Prisma.Decimal(0),
+      netAmount: new Prisma.Decimal(10000),
+      status: InvoiceStatus.OVERDUE,
+      academicYear: { name: '2026-2027' },
+      items: [
+        {
+          id: 'item-1',
+          netAmount: new Prisma.Decimal(10000),
+          feeHeadNameSnapshot: 'Tuition Fee',
+          feeHead: { name: 'Tuition Fee' },
+        },
+      ],
+      paymentAllocations: [],
+      assessedFines: [],
+      student: {
+        id: 'student-1',
+        schoolId: mockSchoolId,
+        firstName: 'Aarav',
+        lastName: 'Sharma',
+        admissionNumber: 'ADM-001',
+        guardianEmail: 'guardian@example.com',
+        guardianPhone: '+919876543210',
+        guardianName: 'Vikram Sharma',
+        grade: { name: 'Grade 10' },
+        section: { name: 'A' },
+        userAccount: null,
+        parentRelations: [],
+      },
+      ...overrides,
+    });
+
+    it('1. Unpaid overdue invoice produces reminder with full amount', async () => {
+      const inv = createBaseInvoice({
+        netAmount: new Prisma.Decimal(12500),
+        paymentAllocations: [],
+      });
+      mockPrisma.feeInvoice.findMany.mockResolvedValue([inv]);
+
+      const result = await service.scanReminders(mockSchoolId, referenceDate);
+
+      expect(result.eligibleRemindersCount).toBe(1);
+      const cand = result.candidates[0];
+      expect(cand.milestone).toBe('OVERDUE');
+      expect(cand.daysOverdue).toBe(5);
+      expect(cand.totalFeeAmount).toBe(12500);
+      expect(cand.paidAmount).toBe(0);
+      expect(cand.balanceDue).toBe(12500);
+      expect(cand.principalBalanceDue).toBe(12500);
+      expect(cand.fineBalanceDue).toBe(0);
+    });
+
+    it('2. Partially paid invoice produces reminder with exact remaining amount', async () => {
+      const inv = createBaseInvoice({
+        netAmount: new Prisma.Decimal(10000),
+        paymentAllocations: [
+          {
+            id: 'alloc-1',
+            invoiceItemId: 'item-1',
+            allocationType: AllocationType.PRINCIPAL,
+            allocatedAmount: new Prisma.Decimal(3500),
+            payment: { status: PaymentStatus.COMPLETED },
+            refundAllocations: [],
+          },
+        ],
+      });
+      mockPrisma.feeInvoice.findMany.mockResolvedValue([inv]);
+
+      const result = await service.scanReminders(mockSchoolId, referenceDate);
+
+      expect(result.eligibleRemindersCount).toBe(1);
+      const cand = result.candidates[0];
+      expect(cand.totalFeeAmount).toBe(10000);
+      expect(cand.paidAmount).toBe(3500);
+      expect(cand.balanceDue).toBe(6500);
+      expect(cand.principalBalanceDue).toBe(6500);
+    });
+
+    it('3. Fully paid invoice produces no reminder', async () => {
+      const inv = createBaseInvoice({
+        netAmount: new Prisma.Decimal(10000),
+        paymentAllocations: [
+          {
+            id: 'alloc-1',
+            invoiceItemId: 'item-1',
+            allocationType: AllocationType.PRINCIPAL,
+            allocatedAmount: new Prisma.Decimal(10000),
+            payment: { status: PaymentStatus.COMPLETED },
+            refundAllocations: [],
+          },
+        ],
+      });
+      mockPrisma.feeInvoice.findMany.mockResolvedValue([inv]);
+
+      const result = await service.scanReminders(mockSchoolId, referenceDate);
+
+      expect(result.eligibleRemindersCount).toBe(0);
+      expect(result.candidates).toHaveLength(0);
+    });
+
+    it('4. Partially refunded payment increases remaining balance correctly', async () => {
+      // Invoice 10,000; originally paid 8,000; 3,000 refunded -> net paid = 5,000, remaining = 5,000
+      const inv = createBaseInvoice({
+        netAmount: new Prisma.Decimal(10000),
+        paymentAllocations: [
+          {
+            id: 'alloc-1',
+            invoiceItemId: 'item-1',
+            allocationType: AllocationType.PRINCIPAL,
+            allocatedAmount: new Prisma.Decimal(8000),
+            payment: { status: PaymentStatus.PARTIALLY_REFUNDED },
+            refundAllocations: [
+              {
+                amount: new Prisma.Decimal(3000),
+                paymentRefund: { status: RefundStatus.SUCCEEDED },
+              },
+            ],
+          },
+        ],
+      });
+      mockPrisma.feeInvoice.findMany.mockResolvedValue([inv]);
+
+      const result = await service.scanReminders(mockSchoolId, referenceDate);
+
+      expect(result.eligibleRemindersCount).toBe(1);
+      const cand = result.candidates[0];
+      expect(cand.totalFeeAmount).toBe(10000);
+      expect(cand.paidAmount).toBe(5000);
+      expect(cand.balanceDue).toBe(5000);
+      expect(cand.principalBalanceDue).toBe(5000);
+    });
+
+    it('5. Fully refunded payment restores full invoice balance', async () => {
+      // Invoice 10,000; paid 10,000; 10,000 refunded -> net paid = 0, remaining = 10,000
+      const inv = createBaseInvoice({
+        netAmount: new Prisma.Decimal(10000),
+        paymentAllocations: [
+          {
+            id: 'alloc-1',
+            invoiceItemId: 'item-1',
+            allocationType: AllocationType.PRINCIPAL,
+            allocatedAmount: new Prisma.Decimal(10000),
+            payment: { status: PaymentStatus.REFUNDED },
+            refundAllocations: [
+              {
+                amount: new Prisma.Decimal(10000),
+                paymentRefund: { status: RefundStatus.SUCCEEDED },
+              },
+            ],
+          },
+        ],
+      });
+      mockPrisma.feeInvoice.findMany.mockResolvedValue([inv]);
+
+      const result = await service.scanReminders(mockSchoolId, referenceDate);
+
+      expect(result.eligibleRemindersCount).toBe(1);
+      const cand = result.candidates[0];
+      expect(cand.paidAmount).toBe(0);
+      expect(cand.balanceDue).toBe(10000);
+    });
+
+    it('6. Reversed payment (REVERSAL allocation) restores invoice balance instead of reducing it', async () => {
+      // Invoice 10,000; paid 6,000; reversed 6,000 via REVERSAL allocation -> net paid = 0, balanceDue = 10,000
+      const inv = createBaseInvoice({
+        netAmount: new Prisma.Decimal(10000),
+        paymentAllocations: [
+          {
+            id: 'alloc-orig',
+            invoiceItemId: 'item-1',
+            allocationType: AllocationType.PRINCIPAL,
+            allocatedAmount: new Prisma.Decimal(6000),
+            payment: { status: PaymentStatus.VOIDED },
+            reversals: [{ id: 'alloc-rev' }],
+            refundAllocations: [],
+          },
+          {
+            id: 'alloc-rev',
+            invoiceItemId: 'item-1',
+            reversalOfAllocationId: 'alloc-orig',
+            allocationType: AllocationType.REVERSAL,
+            allocatedAmount: new Prisma.Decimal(6000),
+            payment: { status: PaymentStatus.VOIDED },
+            refundAllocations: [],
+          },
+        ],
+      });
+      mockPrisma.feeInvoice.findMany.mockResolvedValue([inv]);
+
+      const result = await service.scanReminders(mockSchoolId, referenceDate);
+
+      expect(result.eligibleRemindersCount).toBe(1);
+      const cand = result.candidates[0];
+      expect(cand.paidAmount).toBe(0);
+      expect(cand.balanceDue).toBe(10000);
+      expect(cand.principalBalanceDue).toBe(10000);
+    });
+
+    it('7. Fine allocation does not reduce principal balance and assessed fines are tracked accurately', async () => {
+      // Principal: 10,000 (paid 4,000 -> 6,000 due)
+      // Fine: 500 assessed, 100 waived, 150 paid -> 250 fine due
+      // Total balanceDue = 6,250 (principalBalanceDue = 6,000, fineBalanceDue = 250)
+      const inv = createBaseInvoice({
+        netAmount: new Prisma.Decimal(10000),
+        paymentAllocations: [
+          {
+            id: 'alloc-prin',
+            invoiceItemId: 'item-1',
+            allocationType: AllocationType.PRINCIPAL,
+            allocatedAmount: new Prisma.Decimal(4000),
+            payment: { status: PaymentStatus.COMPLETED },
+            refundAllocations: [],
+          },
+          {
+            id: 'alloc-fine',
+            assessedFineId: 'fine-1',
+            allocationType: AllocationType.FINE,
+            allocatedAmount: new Prisma.Decimal(150),
+            payment: { status: PaymentStatus.COMPLETED },
+            refundAllocations: [],
+          },
+        ],
+        assessedFines: [
+          {
+            id: 'fine-1',
+            assessedAmount: new Prisma.Decimal(500),
+            status: AssessedFineStatus.PARTIALLY_PAID,
+            waivers: [{ waivedAmount: new Prisma.Decimal(100) }],
+            allocations: [
+              {
+                id: 'alloc-fine',
+                assessedFineId: 'fine-1',
+                allocationType: AllocationType.FINE,
+                allocatedAmount: new Prisma.Decimal(150),
+                payment: { status: PaymentStatus.COMPLETED },
+                refundAllocations: [],
+              },
+            ],
+          },
+        ],
+      });
+      mockPrisma.feeInvoice.findMany.mockResolvedValue([inv]);
+
+      const result = await service.scanReminders(mockSchoolId, referenceDate);
+
+      expect(result.eligibleRemindersCount).toBe(1);
+      const cand = result.candidates[0];
+      expect(cand.principalBalanceDue).toBe(6000);
+      expect(cand.fineBalanceDue).toBe(250);
+      expect(cand.totalFeeAmount).toBe(10400); // 10,000 principal + 400 net assessed fine
+      expect(cand.paidAmount).toBe(4150); // 4,000 principal + 150 fine
+      expect(cand.balanceDue).toBe(6250); // 6,000 principal + 250 fine
+    });
+
+    it('8. Supports allocationCategory REVERSAL and prevents negative paid balance', () => {
+      const balance = computeAuthoritativeInvoiceBalance({
+        netAmount: new Prisma.Decimal(5000),
+        paymentAllocations: [
+          {
+            allocatedAmount: new Prisma.Decimal(2000),
+            allocationType: AllocationType.PRINCIPAL,
+            allocationCategory: 'COLLECTION',
+          },
+          {
+            allocatedAmount: new Prisma.Decimal(2000),
+            allocationType: AllocationType.PRINCIPAL,
+            allocationCategory: 'REVERSAL',
+          },
+        ],
+      });
+
+      expect(balance.netPaidPrincipal).toBe(0);
+      expect(balance.principalBalanceDue).toBe(5000);
+      expect(balance.balanceDue).toBe(5000);
+    });
+
+    it('9. Tenant isolation is preserved in reminder queries', async () => {
+      mockPrisma.feeInvoice.findMany.mockResolvedValue([]);
+      await service.scanReminders(mockSchoolId, referenceDate);
+
+      expect(mockPrisma.school.findUnique).toHaveBeenCalledWith({
+        where: { id: mockSchoolId },
+        select: { id: true, name: true, currency: true, timezone: true },
+      });
+      expect(mockPrisma.feeInvoice.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            schoolId: mockSchoolId,
+            status: {
+              notIn: [InvoiceStatus.PAID, InvoiceStatus.VOID],
+            },
+          },
+        }),
+      );
     });
   });
 });

@@ -1,15 +1,29 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { NotFoundException } from '@nestjs/common';
-import { UserRole } from '@prisma/client';
+import {
+  NotFoundException,
+  BadRequestException,
+  ConflictException,
+} from '@nestjs/common';
+import { UserRole, StudentStatus } from '@prisma/client';
 import { StudentsService } from './students.service';
 import { PrismaService } from '../prisma/prisma.service';
 
-describe('StudentsService — Object-Level Authorization & Tenant Isolation', () => {
+describe('StudentsService — Object-Level Authorization, Tenant Isolation & Phase 1B Admissions', () => {
   let service: StudentsService;
   let prisma: PrismaService;
 
   const schoolAId = '00000000-0000-0000-0000-000000000001';
   const schoolBId = '00000000-0000-0000-0000-000000000002';
+
+  let sessionA: any;
+  let gradeA: any;
+  let sectionA: any;
+  let gradeA2: any;
+  let sectionA2: any;
+
+  let sessionB: any;
+  let gradeB: any;
+  let sectionB: any;
 
   let testStudentA: any;
   let testStudentB: any;
@@ -17,6 +31,8 @@ describe('StudentsService — Object-Level Authorization & Tenant Isolation', ()
   let studentBUser: any;
   let verifiedParentUser: any;
   let unverifiedParentUser: any;
+
+  const createdStudentIds: string[] = [];
 
   beforeAll(async () => {
     const module: TestingModule = await Test.createTestingModule({
@@ -27,13 +43,40 @@ describe('StudentsService — Object-Level Authorization & Tenant Isolation', ()
     prisma = module.get<PrismaService>(PrismaService);
 
     // 1. Fetch sessions and grades
-    const sessionA = await prisma.academicYear.findFirst({ where: { schoolId: schoolAId } });
-    const gradeA = await prisma.gradeClass.findFirst({ where: { schoolId: schoolAId } });
-    const sectionA = await prisma.section.findFirst({ where: { schoolId: schoolAId } });
+    sessionA = await prisma.academicYear.findFirst({ where: { schoolId: schoolAId } });
+    const gradesA = await prisma.gradeClass.findMany({
+      where: { schoolId: schoolAId },
+      include: { sections: true },
+      take: 2,
+    });
+    gradeA = gradesA[0];
+    sectionA = gradeA?.sections?.[0];
 
-    const sessionB = await prisma.academicYear.findFirst({ where: { schoolId: schoolBId } });
-    const gradeB = await prisma.gradeClass.findFirst({ where: { schoolId: schoolBId } });
-    const sectionB = await prisma.section.findFirst({ where: { schoolId: schoolBId } });
+    // Ensure gradeA2 is distinct from gradeA
+    if (gradesA.length > 1 && gradesA[1].sections && gradesA[1].sections.length > 0) {
+      gradeA2 = gradesA[1];
+      sectionA2 = gradesA[1].sections[0];
+    } else {
+      gradeA2 = await prisma.gradeClass.create({
+        data: {
+          schoolId: schoolAId,
+          name: 'Grade Test 2',
+          code: `GT2-${Date.now()}`,
+        },
+      });
+      sectionA2 = await prisma.section.create({
+        data: {
+          schoolId: schoolAId,
+          gradeId: gradeA2.id,
+          name: 'Section A2',
+          capacity: 30,
+        },
+      });
+    }
+
+    sessionB = await prisma.academicYear.findFirst({ where: { schoolId: schoolBId } });
+    gradeB = await prisma.gradeClass.findFirst({ where: { schoolId: schoolBId } });
+    sectionB = await prisma.section.findFirst({ where: { schoolId: schoolBId } });
 
     // 2. Create users
     studentAUser = await prisma.user.create({
@@ -90,6 +133,7 @@ describe('StudentsService — Object-Level Authorization & Tenant Isolation', ()
         status: 'ACTIVE',
       },
     });
+    createdStudentIds.push(testStudentA.id);
 
     testStudentB = await prisma.student.create({
       data: {
@@ -104,6 +148,7 @@ describe('StudentsService — Object-Level Authorization & Tenant Isolation', ()
         status: 'ACTIVE',
       },
     });
+    createdStudentIds.push(testStudentB.id);
 
     // 4. Create Parent-Student relationships
     await prisma.parentStudentRelation.create({
@@ -122,23 +167,25 @@ describe('StudentsService — Object-Level Authorization & Tenant Isolation', ()
         parentId: unverifiedParentUser.id,
         studentId: testStudentA.id,
         relationshipType: 'FATHER',
-        isVerified: false, // Unverified!
+        isVerified: false,
       },
     });
   });
 
   afterAll(async () => {
-    if (testStudentA) {
+    if (createdStudentIds.length > 0) {
       await prisma.parentStudentRelation.deleteMany({
-        where: { studentId: testStudentA.id },
+        where: { studentId: { in: createdStudentIds } },
       });
-      await prisma.student.delete({ where: { id: testStudentA.id } }).catch(() => {});
-    }
-    if (testStudentB) {
-      await prisma.parentStudentRelation.deleteMany({
-        where: { studentId: testStudentB.id },
+      await prisma.studentFeeAllocation.deleteMany({
+        where: { studentId: { in: createdStudentIds } },
       });
-      await prisma.student.delete({ where: { id: testStudentB.id } }).catch(() => {});
+      await prisma.feeInvoice.deleteMany({
+        where: { studentId: { in: createdStudentIds } },
+      });
+      await prisma.student.deleteMany({
+        where: { id: { in: createdStudentIds } },
+      });
     }
 
     const userIds = [
@@ -195,15 +242,183 @@ describe('StudentsService — Object-Level Authorization & Tenant Isolation', ()
     });
 
     it('strictly rejects cross-school student ID with 404 NotFoundException', async () => {
-      // Querying School B student under School A context
       await expect(
         service.findOneForSchool(schoolAId, testStudentB.id),
       ).rejects.toThrow(NotFoundException);
 
-      // Querying School A student under School B context
       await expect(
         service.findOneForSchool(schoolBId, testStudentA.id),
       ).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  describe('findStudents — Backward Compatibility & Pagination', () => {
+    it('returns a raw array when page is omitted (backward compatibility)', async () => {
+      const res = await service.findStudents(schoolAId);
+      expect(Array.isArray(res)).toBe(true);
+      expect((res as any[]).some((s) => s.id === testStudentA.id)).toBe(true);
+    });
+
+    it('returns paginated { data, meta } when page is provided', async () => {
+      const res: any = await service.findStudents(schoolAId, { page: 1, limit: 5 });
+      expect(res.data).toBeDefined();
+      expect(Array.isArray(res.data)).toBe(true);
+      expect(res.meta).toBeDefined();
+      expect(res.meta.page).toBe(1);
+      expect(res.meta.limit).toBe(5);
+      expect(typeof res.meta.total).toBe('number');
+      expect(res.meta.totalPages).toBeGreaterThanOrEqual(1);
+    });
+
+    it('filters students by search query across name and admission number', async () => {
+      const res: any = await service.findStudents(schoolAId, {
+        page: 1,
+        limit: 10,
+        search: testStudentA.admissionNumber,
+      });
+      expect(res.data.length).toBe(1);
+      expect(res.data[0].id).toBe(testStudentA.id);
+    });
+  });
+
+  describe('createStudent — Individual Admission', () => {
+    it('successfully admits a new student with uppercase normalized admission number', async () => {
+      const admNo = `adm-${Date.now()}`;
+      const newStudent = await service.createStudent(schoolAId, {
+        admissionNumber: `  ${admNo}  `,
+        firstName: 'Aarav',
+        lastName: 'Sharma',
+        gradeId: gradeA.id,
+        sectionId: sectionA.id,
+        academicYearId: sessionA.id,
+        rollNumber: 'R-101',
+        guardianName: 'Vikram Sharma',
+        guardianPhone: '+91 9876543210',
+        guardianEmail: 'vikram.sharma@example.com',
+        status: StudentStatus.ACTIVE,
+      });
+
+      createdStudentIds.push(newStudent.id);
+
+      expect(newStudent.id).toBeDefined();
+      expect(newStudent.admissionNumber).toBe(admNo.toUpperCase());
+      expect(newStudent.firstName).toBe('Aarav');
+      expect(newStudent.lastName).toBe('Sharma');
+      expect(newStudent.gradeId).toBe(gradeA.id);
+      expect(newStudent.sectionId).toBe(sectionA.id);
+      expect(newStudent.schoolId).toBe(schoolAId);
+    });
+
+    it('rejects duplicate admission number in the same school with ConflictException', async () => {
+      await expect(
+        service.createStudent(schoolAId, {
+          admissionNumber: testStudentA.admissionNumber,
+          firstName: 'Duplicate',
+          lastName: 'Student',
+          gradeId: gradeA.id,
+          sectionId: sectionA.id,
+          academicYearId: sessionA.id,
+        }),
+      ).rejects.toThrow(ConflictException);
+    });
+
+    it('rejects cross-tenant academic reference with BadRequestException', async () => {
+      await expect(
+        service.createStudent(schoolAId, {
+          admissionNumber: `CROSS-${Date.now()}`,
+          firstName: 'Cross',
+          lastName: 'Tenant',
+          gradeId: gradeB.id, // Belongs to School B!
+          sectionId: sectionA.id,
+          academicYearId: sessionA.id,
+        }),
+      ).rejects.toThrow(BadRequestException);
+    });
+  });
+
+  describe('updateStudent & Financial Integrity Guard', () => {
+    let studentForUpdate: any;
+
+    beforeAll(async () => {
+      studentForUpdate = await service.createStudent(schoolAId, {
+        admissionNumber: `UPD-${Date.now()}`,
+        firstName: 'Update',
+        lastName: 'Target',
+        gradeId: gradeA.id,
+        sectionId: sectionA.id,
+        academicYearId: sessionA.id,
+        guardianName: 'Initial Guardian',
+      });
+      createdStudentIds.push(studentForUpdate.id);
+    });
+
+    it('safely updates demographic and guardian information', async () => {
+      const updated = await service.updateStudent(schoolAId, studentForUpdate.id, {
+        firstName: 'UpdatedName',
+        guardianName: 'Updated Guardian',
+        guardianPhone: '+91 9999988888',
+      });
+
+      expect(updated.firstName).toBe('UpdatedName');
+      expect(updated.guardianName).toBe('Updated Guardian');
+      expect(updated.guardianPhone).toBe('+91 9999988888');
+    });
+
+    it('blocks class change if student has active fee allocations or invoices', async () => {
+      // Simulate an active fee allocation for this student
+      const feeStructure = await prisma.feeStructure.findFirst({
+        where: { schoolId: schoolAId },
+      });
+
+      if (feeStructure) {
+        const allocation = await prisma.studentFeeAllocation.create({
+          data: {
+            schoolId: schoolAId,
+            studentId: studentForUpdate.id,
+            feeStructureId: feeStructure.id,
+            academicYearId: sessionA.id,
+            status: 'ACTIVE',
+          },
+        });
+
+        // Attempting to change grade must fail with BadRequestException explaining the financial block
+        await expect(
+          service.updateStudent(schoolAId, studentForUpdate.id, {
+            gradeId: gradeA2.id,
+            sectionId: sectionA2.id,
+          }),
+        ).rejects.toThrow(BadRequestException);
+
+        // Clean up allocation for subsequent tests
+        await prisma.studentFeeAllocation.delete({ where: { id: allocation.id } });
+      }
+    });
+
+    it('allows class change when no active allocations or invoices exist', async () => {
+      if (gradeA2 && gradeA2.id !== gradeA.id) {
+        const updated = await service.updateStudent(schoolAId, studentForUpdate.id, {
+          gradeId: gradeA2.id,
+          sectionId: sectionA2.id,
+        });
+
+        expect(updated.gradeId).toBe(gradeA2.id);
+        expect(updated.sectionId).toBe(sectionA2.id);
+      }
+    });
+  });
+
+  describe('getStudentProfile', () => {
+    it('returns full student profile including relations and financial counts', async () => {
+      const profile: any = await service.getStudentProfile(schoolAId, testStudentA.id);
+      expect(profile).toBeDefined();
+      expect(profile.id).toBe(testStudentA.id);
+      expect(profile.grade).toBeDefined();
+      expect(profile.section).toBeDefined();
+      expect(profile.academicYear).toBeDefined();
+      expect(profile.userAccount).toBeDefined();
+      expect(profile.parentRelations).toBeDefined();
+      expect(profile._count).toBeDefined();
+      expect(typeof profile._count.invoices).toBe('number');
     });
   });
 });

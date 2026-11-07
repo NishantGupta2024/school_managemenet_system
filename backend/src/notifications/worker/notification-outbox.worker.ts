@@ -26,6 +26,7 @@ import { sanitizeSenderDisplayName } from '../templates/template-sanitizer';
 import { WhatsAppProvider } from '../whatsapp/whatsapp-provider.interface';
 import { normalizeWhatsAppError } from '../whatsapp/memory-whatsapp.provider';
 import { normalizeWhatsAppPhoneNumber } from '../whatsapp/whatsapp-cloud-api.provider';
+import { EmailRateLimiter, MailtrapRateLimiter } from '../email/mailtrap-rate-limiter';
 
 export interface WorkerBatchResult {
   claimedCount: number;
@@ -50,6 +51,7 @@ export class NotificationOutboxWorker
   public readonly intervalMs: number;
   public readonly lockDurationMs: number;
   public readonly maxAttempts: number;
+  public readonly rateLimiter: EmailRateLimiter;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -57,6 +59,7 @@ export class NotificationOutboxWorker
     private readonly emailConfigService: EmailConfigService,
     private readonly templateRenderer: EmailTemplateRenderer,
     @Optional() private readonly whatsappProvider?: WhatsAppProvider,
+    @Optional() rateLimiter?: EmailRateLimiter,
   ) {
     this.isEnabled = process.env.NOTIFICATION_WORKER_ENABLED === 'true';
     this.batchSize = Math.max(
@@ -75,6 +78,7 @@ export class NotificationOutboxWorker
       1,
       parseInt(process.env.NOTIFICATION_MAX_ATTEMPTS || '5', 10),
     );
+    this.rateLimiter = rateLimiter || new MailtrapRateLimiter();
   }
 
   onApplicationBootstrap() {
@@ -444,6 +448,46 @@ export class NotificationOutboxWorker
     }
 
     // 5. Send email through provider OUTSIDE any database transaction
+    // Acquire rate-limiting slot prior to network transmission outside DB transaction.
+    // If distributed rate limiting fails closed (e.g. Redis outage), handle as transient error
+    // so the record remains safe for retry rather than unsafely bypassing provider rate limits.
+    try {
+      const waitMs = await this.rateLimiter.acquireSlot();
+      if (waitMs > 100) {
+        this.logger.debug(`[RateLimiter] Paced dispatch for record ${record.id} by ${waitMs}ms`);
+      }
+    } catch (limiterErr: any) {
+      this.logger.error(
+        `[RateLimiter Failed-Closed] Cannot dispatch record ${record.id}: ${limiterErr.message}. Preserving record for retry.`,
+      );
+
+      const completedAt = new Date();
+      const providerError = normalizeEmailError(limiterErr);
+      const retryPolicy = this.calculateNextAttempt(record.attemptCount, providerError);
+
+      await this.finalizeRecord(
+        record.id,
+        claimedLockedAt,
+        NotificationStatus.FAILED,
+        {
+          lastErrorCode: providerError.code,
+          lastErrorMessage: providerError.message,
+          nextAttemptAt: retryPolicy.nextAttemptAt,
+        },
+        {
+          attemptNumber: record.attemptCount,
+          startedAt,
+          completedAt,
+          outcome: NotificationStatus.FAILED,
+          errorCode: providerError.code,
+          errorMessage: providerError.message,
+          retryScheduled: retryPolicy.retryScheduled,
+        },
+      );
+
+      return NotificationStatus.FAILED;
+    }
+
     // Setup lease renewal heartbeat for slow dispatches
     let currentLockedAt = claimedLockedAt;
     let leaseLost = false;

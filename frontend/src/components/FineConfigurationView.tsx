@@ -1,3 +1,4 @@
+
 import React, { useEffect, useState } from 'react';
 import {
   AcademicYear,
@@ -110,8 +111,8 @@ export const FineConfigurationView: React.FC = () => {
     } catch (err: any) {
       setError(
         err?.response?.data?.message ||
-          err?.message ||
-          'Failed to load fine configuration data.',
+        err?.message ||
+        'Failed to load fine configuration data.',
       );
     } finally {
       setLoading(false);
@@ -132,8 +133,8 @@ export const FineConfigurationView: React.FC = () => {
     } catch (err: any) {
       setError(
         err?.response?.data?.message ||
-          err?.message ||
-          'Failed to load fine rules for the selected session.',
+        err?.message ||
+        'Failed to load fine rules for the selected session.',
       );
     }
   };
@@ -318,8 +319,8 @@ export const FineConfigurationView: React.FC = () => {
     } catch (err: any) {
       setError(
         err?.response?.data?.message ||
-          err?.message ||
-          'Failed to update rule status.',
+        err?.message ||
+        'Failed to update rule status.',
       );
     }
   };
@@ -334,8 +335,8 @@ export const FineConfigurationView: React.FC = () => {
     } catch (err: any) {
       setError(
         err?.response?.data?.message ||
-          err?.message ||
-          'Failed to delete fine rule.',
+        err?.message ||
+        'Failed to delete fine rule.',
       );
     }
   };
@@ -786,8 +787,8 @@ export const FineConfigurationView: React.FC = () => {
                         {rule.fineType === 'PERCENTAGE'
                           ? `${Number(rule.fineValue).toFixed(2)}%`
                           : `₹${Number(rule.fineValue).toLocaleString('en-IN', {
-                              minimumFractionDigits: 2,
-                            })}`}
+                            minimumFractionDigits: 2,
+                          })}`}
                         {rule.fineType === 'PER_DAY' ? ' / day' : ''}
                       </div>
                     </td>
@@ -804,10 +805,10 @@ export const FineConfigurationView: React.FC = () => {
                     </td>
                     <td className="py-3.5 px-4 font-mono text-slate-700">
                       {rule.maxFineCap !== null &&
-                      rule.maxFineCap !== undefined
+                        rule.maxFineCap !== undefined
                         ? `₹${Number(rule.maxFineCap).toLocaleString('en-IN', {
-                            minimumFractionDigits: 2,
-                          })}`
+                          minimumFractionDigits: 2,
+                        })}`
                         : '—'}
                     </td>
                     <td className="py-3.5 px-4 text-xs text-slate-600">
@@ -832,11 +833,10 @@ export const FineConfigurationView: React.FC = () => {
                     </td>
                     <td className="py-3.5 px-4">
                       <span
-                        className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold ${
-                          rule.status === 'ACTIVE'
+                        className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold ${rule.status === 'ACTIVE'
                             ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
                             : 'bg-slate-100 text-slate-600 border border-slate-200'
-                        }`}
+                          }`}
                       >
                         {rule.status}
                       </span>

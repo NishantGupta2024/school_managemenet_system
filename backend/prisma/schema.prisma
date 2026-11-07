@@ -17,8 +17,15 @@ enum UserRole {
   PLATFORM_SUPER_ADMIN
   SCHOOL_ADMIN
   FEE_STAFF
+  TEACHER
   STUDENT
   PARENT
+}
+
+enum TeacherStatus {
+  ACTIVE
+  INACTIVE
+  ON_LEAVE
 }
 
 enum UserStatus {
@@ -85,7 +92,38 @@ enum PaymentMethod {
   UPI
   POS_CARD
   DEMAND_DRAFT
+  ONLINE_RAZORPAY
   OTHER
+}
+
+enum GatewayProvider {
+  RAZORPAY
+}
+
+enum GatewayEnvironment {
+  TEST
+  LIVE
+}
+
+enum GatewayStatus {
+  DISABLED
+  PENDING_VERIFICATION
+  ACTIVE
+}
+
+enum OnlinePaymentStatus {
+  CREATED
+  ATTEMPTED
+  SUCCESS
+  FAILED
+  EXPIRED
+}
+
+enum OnlineReconciliationStatus {
+  NONE
+  UNRESOLVED
+  PARTIALLY_RESOLVED
+  FULLY_RESOLVED
 }
 
 enum PaymentStatus {
@@ -161,6 +199,11 @@ enum NotificationEventType {
   PAYMENT_REVERSED
   REFUND_SUCCEEDED
   REFUND_FAILED
+  FEE_DUE_REMINDER
+  STUDENT_ADMITTED
+  ATTENDANCE_ABSENT
+  EXAM_SCHEDULE_PUBLISHED
+  EXAM_RESULTS_RELEASED
 }
 
 // -------------------------------------------------------------
@@ -185,6 +228,8 @@ model School {
   grades                    GradeClass[]
   sections                  Section[]
   students                  Student[]
+  teachers                  Teacher[]
+  teacherAssignments        TeacherAssignment[]
   feeHeads                  FeeHead[]
   feeStructures             FeeStructure[]
   feeStructureItems         FeeStructureItem[]
@@ -207,7 +252,31 @@ model School {
   reversalSequenceCounters  ReversalSequenceCounter[]
   notificationOutboxRecords NotificationOutbox[]
   notificationSettings      SchoolNotificationSetting?
+  paymentGatewayConfig      SchoolPaymentGatewayConfig?
+  onlinePaymentOrders       OnlinePaymentOrder[]
+  onlinePaymentSurplusResolutions OnlinePaymentSurplusResolution[]
+  receiptTemplates                ReceiptTemplate[]
+  receiptTemplateVersions         ReceiptTemplateVersion[]
+  receiptArtifacts                ReceiptArtifact[]
+  defaultReceiptTemplateId        String?
+  defaultReceiptTemplate          ReceiptTemplate?                @relation("SchoolDefaultReceiptTemplate", fields: [id, defaultReceiptTemplateId], references: [schoolId, id], onDelete: Restrict)
+  receiptNumberConfig             SchoolReceiptNumberConfig?
+  attendanceRegisters             AttendanceRegister[]
+  studentAttendance               StudentAttendance[]
+  attendanceCorrectionLogs        AttendanceCorrectionLog[]
+  schoolHolidays                  SchoolHoliday[]
+  assessmentChapters              AssessmentChapter[]
+  assessments                     Assessment[]
+  assessmentSections              AssessmentSection[]
+  assessmentQuestions             AssessmentQuestion[]
+  questionImageArtifacts          QuestionImageArtifact[]
+  assessmentAttempts              AssessmentAttempt[]
+  attemptAnswers                  AttemptAnswer[]
+  assessmentResults               AssessmentResult[]
+  studentAssessmentProgressions   StudentAssessmentProgression[]
+  examinationSetting              SchoolExaminationSetting?
 
+  @@unique([id, defaultReceiptTemplateId])
   @@map("schools")
 }
 
@@ -215,20 +284,27 @@ model School {
 // Users: Platform Super Admins, School Admins, Staff, Students, Parents
 // -------------------------------------------------------------
 model User {
-  id           String     @id @default(uuid())
-  schoolId     String? // Nullable strictly for PLATFORM_SUPER_ADMIN
-  email        String
-  passwordHash String
-  name         String
-  role         UserRole   @default(FEE_STAFF)
-  status       UserStatus @default(ACTIVE)
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
+  id                  String     @id @default(uuid())
+  schoolId            String? // Nullable strictly for PLATFORM_SUPER_ADMIN
+  email               String
+  passwordHash        String
+  name                String
+  role                UserRole   @default(FEE_STAFF)
+  status              UserStatus @default(ACTIVE)
+  failedLoginAttempts Int        @default(0)
+  lockedUntil         DateTime?
+  lastLoginAt         DateTime?
+  passwordChangedAt   DateTime?
+  createdAt           DateTime   @default(now())
+  updatedAt           DateTime   @updatedAt
 
-  school                     School?                 @relation(fields: [schoolId], references: [id], onDelete: Cascade)
-  authorizedAllocations      StudentFeeAllocation[]
+  school                           School?                          @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  sessions                         UserSession[]
+  passwordResetTokens              PasswordResetToken[]
+  authorizedAllocations            StudentFeeAllocation[]
   feeGenerationRuns          FeeGenerationRun[]
   studentProfile             Student?                @relation("StudentUserAccount")
+  teacherProfile             Teacher?                @relation("TeacherUserAccount")
   parentRelations            ParentStudentRelation[]
   createdFineRules           FineRule[]              @relation("FineRuleCreatedBy")
   updatedFineRules           FineRule[]              @relation("FineRuleUpdatedBy")
@@ -238,6 +314,14 @@ model User {
   authorizedRefunds          PaymentRefund[]         @relation("PaymentRefundAuthorizedBy")
   processedRefunds           PaymentRefund[]         @relation("PaymentRefundProcessedBy")
   authorizedPaymentReversals PaymentReversal[]       @relation("PaymentReversalAuthorizedBy")
+  authorizedSurplusResolutions OnlinePaymentSurplusResolution[] @relation("SurplusResolvedBy")
+  uploadedReceiptTemplateVersions  ReceiptTemplateVersion[] @relation("TemplateUploadedBy")
+  activatedReceiptTemplateVersions ReceiptTemplateVersion[] @relation("TemplateActivatedBy")
+  submittedAttendanceRegisters     AttendanceRegister[]     @relation("RegisterSubmittedByUser")
+  lockedAttendanceRegisters        AttendanceRegister[]     @relation("RegisterLockedByUser")
+  markedAttendanceRecords          StudentAttendance[]      @relation("AttendanceMarkedByUser")
+  updatedAttendanceRecords         StudentAttendance[]      @relation("AttendanceUpdatedByUser")
+  attendanceCorrections            AttendanceCorrectionLog[] @relation("CorrectionChangedByUser")
 
   @@unique([schoolId, email])
   @@index([schoolId])
@@ -259,6 +343,7 @@ model AcademicYear {
 
   school                   School                     @relation(fields: [schoolId], references: [id], onDelete: Cascade)
   students                 Student[]
+  teacherAssignments       TeacherAssignment[]
   feeStructures            FeeStructure[]
   studentFeeAllocations    StudentFeeAllocation[]
   invoices                 FeeInvoice[]
@@ -269,6 +354,11 @@ model AcademicYear {
   receiptSequenceCounters  ReceiptSequenceCounter[]
   receipts                 Receipt[]
   reversalSequenceCounters ReversalSequenceCounter[]
+  attendanceRegisters      AttendanceRegister[]
+  studentAttendance        StudentAttendance[]
+  schoolHolidays           SchoolHoliday[]
+  assessments              Assessment[]
+  assessmentChapters       AssessmentChapter[]
 
   @@unique([schoolId, name])
   @@unique([schoolId, id]) // Required for composite foreign key constraint
@@ -290,7 +380,12 @@ model GradeClass {
   school        School         @relation(fields: [schoolId], references: [id], onDelete: Cascade)
   sections      Section[]
   students      Student[]
+  teacherAssignments TeacherAssignment[]
   feeStructures FeeStructure[]
+  attendanceRegisters AttendanceRegister[]
+  studentAttendance   StudentAttendance[]
+  assessmentChapters  AssessmentChapter[]
+  assessments         Assessment[]
 
   @@unique([schoolId, code])
   @@unique([schoolId, id]) // Required for composite foreign key constraint
@@ -314,6 +409,10 @@ model Section {
   // Composite foreign key: Guarantees grade belongs to the EXACT same school
   grade    GradeClass @relation(fields: [schoolId, gradeId], references: [schoolId, id], onDelete: Cascade)
   students Student[]
+  teacherAssignments TeacherAssignment[]
+  attendanceRegisters AttendanceRegister[]
+  studentAttendance   StudentAttendance[]
+  assessments         Assessment[]
 
   @@unique([schoolId, gradeId, name])
   @@unique([schoolId, id]) // Required for composite foreign key constraint
@@ -356,6 +455,12 @@ model Student {
   parentRelations ParentStudentRelation[]
   oneTimeBillings StudentOneTimeFeeBilling[]
   payments        Payment[]
+  onlinePaymentOrders OnlinePaymentOrder[]
+  attendanceRecords     StudentAttendance[]
+  attendanceCorrections AttendanceCorrectionLog[]
+  assessmentAttempts    AssessmentAttempt[]
+  assessmentResults     AssessmentResult[]
+  assessmentProgressions StudentAssessmentProgression[]
 
   @@unique([schoolId, admissionNumber])
   @@unique([schoolId, id])
@@ -364,6 +469,69 @@ model Student {
   @@index([sectionId])
   @@index([academicYearId])
   @@map("students")
+}
+
+// -------------------------------------------------------------
+// Teacher & Staff Profiles
+// -------------------------------------------------------------
+model Teacher {
+  id          String        @id @default(uuid())
+  schoolId    String
+  employeeId  String        // e.g. "EMP-2026-001" - unique within school
+  firstName   String
+  lastName    String
+  email       String        // Official / contact email
+  phone       String?
+  department  String?       // e.g. "Science", "Mathematics", "Languages"
+  designation String?       // e.g. "Senior Teacher", "Head of Department"
+  joiningDate DateTime?
+  status      TeacherStatus @default(ACTIVE)
+  userId      String?       @unique
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  school      School              @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  userAccount User?               @relation("TeacherUserAccount", fields: [userId], references: [id], onDelete: SetNull)
+  assignments TeacherAssignment[]
+  authoredAssessments Assessment[]
+  authoredChapters    AssessmentChapter[] @relation("AuthoredChapters")
+
+  @@unique([schoolId, employeeId])
+  @@unique([schoolId, id])
+  @@index([schoolId])
+  @@index([department])
+  @@index([status])
+  @@map("teachers")
+}
+
+// -------------------------------------------------------------
+// Teacher Class & Subject Assignments
+// -------------------------------------------------------------
+model TeacherAssignment {
+  id             String       @id @default(uuid())
+  schoolId       String
+  teacherId      String
+  academicYearId String
+  gradeId        String
+  sectionId      String
+  subject        String       @default("General")
+  isClassTeacher Boolean      @default(false)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  school         School       @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  teacher        Teacher      @relation(fields: [schoolId, teacherId], references: [schoolId, id], onDelete: Cascade)
+  academicYear   AcademicYear @relation(fields: [schoolId, academicYearId], references: [schoolId, id], onDelete: Cascade)
+  grade          GradeClass   @relation(fields: [schoolId, gradeId], references: [schoolId, id], onDelete: Cascade)
+  section        Section      @relation(fields: [schoolId, sectionId], references: [schoolId, id], onDelete: Cascade)
+
+  @@unique([schoolId, teacherId, academicYearId, sectionId, subject])
+  @@index([schoolId])
+  @@index([teacherId])
+  @@index([sectionId])
+  @@index([gradeId])
+  @@index([academicYearId])
+  @@map("teacher_assignments")
 }
 
 // =============================================================
@@ -523,6 +691,7 @@ model FeeInvoice {
   paymentAllocations PaymentAllocation[]
   assessedFines      AssessedFine[]
   fineWaivers        FineWaiver[]
+  onlinePaymentOrders OnlinePaymentOrder[]
 
   @@unique([schoolId, studentId, academicYearId, billingMonth])
   @@unique([schoolId, id])
@@ -764,6 +933,7 @@ model Payment {
   receipt         Receipt?
   refunds         PaymentRefund[]
   reversals       PaymentReversal[]
+  onlinePaymentOrder OnlinePaymentOrder?
 
   @@unique([schoolId, paymentNumber])
   @@unique([schoolId, idempotencyKey])
@@ -882,11 +1052,14 @@ model Receipt {
   totalAmount     Decimal       @db.Decimal(12, 2)
   status          ReceiptStatus @default(ACTIVE)
   receiptSnapshot Json // Frozen JSON snapshot of student, line items, cashier, etc.
+  templateVersionId String?
   createdAt       DateTime      @default(now())
 
-  school       School       @relation(fields: [schoolId], references: [id], onDelete: Cascade)
-  payment      Payment      @relation(fields: [schoolId, paymentId], references: [schoolId, id], onDelete: Restrict)
-  academicYear AcademicYear @relation(fields: [schoolId, academicYearId], references: [schoolId, id], onDelete: Restrict)
+  school          School                  @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  payment         Payment                 @relation(fields: [schoolId, paymentId], references: [schoolId, id], onDelete: Restrict)
+  academicYear    AcademicYear            @relation(fields: [schoolId, academicYearId], references: [schoolId, id], onDelete: Restrict)
+  templateVersion ReceiptTemplateVersion? @relation(fields: [schoolId, templateVersionId], references: [schoolId, id], onDelete: Restrict)
+  artifact        ReceiptArtifact?
 
   @@unique([schoolId, paymentId])
   @@unique([schoolId, receiptNumber])
@@ -1053,19 +1226,840 @@ model NotificationDeliveryAttempt {
 // School Notification Setting: Tenant-Scoped Preferences
 // -------------------------------------------------------------
 model SchoolNotificationSetting {
-  id                          String   @id @default(uuid())
-  schoolId                    String   @unique
-  receiptEmailEnabled         Boolean  @default(true)
-  paymentReversalEmailEnabled Boolean  @default(true)
-  refundSuccessEmailEnabled   Boolean  @default(true)
-  refundFailureEmailEnabled   Boolean  @default(true)
-  senderDisplayName           String?
-  replyToEmail                String?
-  createdAt                   DateTime @default(now())
-  updatedAt                   DateTime @updatedAt
+  id                            String   @id @default(uuid())
+  schoolId                      String   @unique
+  receiptEmailEnabled           Boolean  @default(true)
+  paymentReversalEmailEnabled   Boolean  @default(true)
+  refundSuccessEmailEnabled     Boolean  @default(true)
+  refundFailureEmailEnabled     Boolean  @default(true)
+  feeReminderEmailEnabled       Boolean  @default(false)
+  studentAdmissionEmailEnabled  Boolean  @default(true)
+  attendanceAbsenceEmailEnabled Boolean  @default(false)
+  examScheduleEmailEnabled      Boolean  @default(true)
+  examResultsEmailEnabled       Boolean  @default(true)
+  senderDisplayName             String?
+  replyToEmail                  String?
+  createdAt                     DateTime @default(now())
+  updatedAt                     DateTime @updatedAt
 
   school School @relation(fields: [schoolId], references: [id], onDelete: Cascade)
 
   @@unique([schoolId, id])
   @@map("school_notification_settings")
 }
+
+// =============================================================
+// PHASE 2F: PAYMENT GATEWAY INTEGRATION TIER (RAZORPAY)
+// =============================================================
+
+// -------------------------------------------------------------
+// School Payment Gateway Configuration: School-Wise Encrypted Credentials
+// -------------------------------------------------------------
+model SchoolPaymentGatewayConfig {
+  id                     String             @id @default(uuid())
+  schoolId               String             @unique
+  provider               GatewayProvider    @default(RAZORPAY)
+  merchantName           String?
+  keyId                  String             // Public Key ID (e.g. rzp_test_xxxx or rzp_live_xxxx)
+  encryptedKeySecret     String             // AES-256-GCM ciphertext (hex)
+  keySecretIv            String             // 12-byte initialization vector (hex)
+  keySecretAuthTag       String             // 16-byte GCM authentication tag (hex)
+  encryptedWebhookSecret String?            // Optional AES-256-GCM ciphertext for webhook secret
+  webhookSecretIv        String?            // 12-byte initialization vector (hex)
+  webhookSecretAuthTag   String?            // 16-byte GCM authentication tag (hex)
+  environment            GatewayEnvironment @default(TEST)
+  status                 GatewayStatus      @default(PENDING_VERIFICATION)
+  lastVerifiedAt         DateTime?
+  lastVerificationError  String?
+  createdAt              DateTime           @default(now())
+  updatedAt              DateTime           @updatedAt
+
+  school School @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+
+  @@unique([schoolId, id])
+  @@index([schoolId])
+  @@index([status])
+  @@map("school_payment_gateway_configs")
+}
+
+// -------------------------------------------------------------
+// Online Payment Order: Intermediate Attempt Tracking & Provider Correlation
+// -------------------------------------------------------------
+model OnlinePaymentOrder {
+  id                String              @id @default(uuid())
+  schoolId          String
+  studentId         String
+  invoiceId         String
+  academicYearId    String
+  providerOrderId   String              // Razorpay order_id (e.g. order_OPW89x...)
+  providerPaymentId String?             // Razorpay payment_id (e.g. pay_OPW90y...)
+  idempotencyKey    String              // Unique attempt idempotency key
+  amount            Decimal             @db.Decimal(12, 2)
+  currency          String              @default("INR")
+  status            OnlinePaymentStatus @default(CREATED)
+  surplusAmount        Decimal                    @default(0.00) @db.Decimal(12, 2)
+  resolvedSurplusAmount Decimal                    @default(0.00) @db.Decimal(12, 2)
+  reconciliationStatus OnlineReconciliationStatus @default(NONE)
+  providerSignature String?             // Hex HMAC signature returned by Checkout
+  failureReason     String?
+  paymentId         String?             @unique // 1-to-1 foreign key to committed Payment
+  metadata          Json?               // Request snapshot (student name, fees breakdown, etc.)
+  verifiedAt        DateTime?
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+
+  school             School                           @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  student            Student                          @relation(fields: [schoolId, studentId], references: [schoolId, id], onDelete: Cascade)
+  invoice            FeeInvoice                       @relation(fields: [schoolId, invoiceId], references: [schoolId, id], onDelete: Cascade)
+  payment            Payment?                         @relation(fields: [paymentId], references: [id], onDelete: SetNull)
+  surplusResolutions OnlinePaymentSurplusResolution[]
+
+  @@unique([schoolId, providerOrderId])
+  @@unique([schoolId, idempotencyKey])
+  @@unique([schoolId, providerPaymentId])
+  @@unique([schoolId, id])
+  @@index([schoolId])
+  @@index([studentId])
+  @@index([invoiceId])
+  @@index([status])
+  @@index([providerPaymentId])
+  @@map("online_payment_orders")
+}
+
+// -------------------------------------------------------------
+// Online Payment Surplus Resolution: Child Ledger for Surplus Allocations
+// -------------------------------------------------------------
+model OnlinePaymentSurplusResolution {
+  id                      String   @id @default(uuid())
+  schoolId                String
+  orderId                 String
+  resolvedAmount          Decimal  @db.Decimal(12, 2)
+  action                  String
+  notes                   String   @db.Text
+  externalReferenceNumber String?
+  idempotencyKey          String?
+  resolvedByUserId        String?
+  resolvedAt              DateTime @default(now())
+  createdAt               DateTime @default(now())
+
+  school         School             @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  order          OnlinePaymentOrder @relation(fields: [schoolId, orderId], references: [schoolId, id], onDelete: Restrict)
+  resolvedByUser User?              @relation("SurplusResolvedBy", fields: [resolvedByUserId], references: [id], onDelete: SetNull)
+
+  @@unique([schoolId, id])
+  @@unique([schoolId, idempotencyKey])
+  @@index([schoolId])
+  @@index([orderId])
+  @@index([resolvedAt])
+  @@map("online_payment_surplus_resolutions")
+}
+
+// =============================================================
+// PHASE R1: CUSTOM RECEIPT TEMPLATES & ARTIFACT MANAGEMENT TIER
+// =============================================================
+
+enum ReceiptTemplateStatus {
+  DRAFT
+  ACTIVE
+  ARCHIVED
+}
+
+enum TemplateVersionStatus {
+  PENDING_PREVIEW
+  VALIDATED
+  ACTIVE
+  SUPERSEDED
+  REJECTED
+}
+
+enum ReceiptArtifactStatus {
+  PENDING
+  READY
+  FAILED
+}
+
+// -------------------------------------------------------------
+// Receipt Template: School-Wise Template Specification Master
+// -------------------------------------------------------------
+model ReceiptTemplate {
+  id              String                @id @default(uuid())
+  schoolId        String
+  name            String                @default("Default Receipt Template")
+  description     String?
+  status          ReceiptTemplateStatus @default(DRAFT)
+  activeVersionId String?               @unique
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
+
+  school            School                   @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  activeVersion     ReceiptTemplateVersion?  @relation("ActiveTemplateVersion", fields: [schoolId, activeVersionId], references: [schoolId, id], onDelete: Restrict)
+  versions          ReceiptTemplateVersion[] @relation("TemplateVersions")
+  defaultForSchool  School?                  @relation("SchoolDefaultReceiptTemplate")
+
+  @@unique([schoolId, name])
+  @@unique([schoolId, id])
+  @@unique([schoolId, activeVersionId])
+  @@index([schoolId])
+  @@map("receipt_templates")
+}
+
+// -------------------------------------------------------------
+// Receipt Template Version: Immutable Versioned DOCX Uploads
+// -------------------------------------------------------------
+model ReceiptTemplateVersion {
+  id                    String                @id @default(uuid())
+  schoolId              String
+  templateId            String
+  versionNumber         Int
+  fileName              String
+  fileSize              Int
+  mimeType              String
+  storagePath           String
+  checksumSha256        String
+  placeholdersDetected  Json
+  validationDiagnostics Json?
+  status                TemplateVersionStatus @default(PENDING_PREVIEW)
+  uploadedByUserId      String?
+  activatedByUserId     String?
+  activatedAt           DateTime?
+  createdAt             DateTime              @default(now())
+
+  school          School            @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  template        ReceiptTemplate   @relation("TemplateVersions", fields: [schoolId, templateId], references: [schoolId, id], onDelete: Cascade)
+  activeFor       ReceiptTemplate?  @relation("ActiveTemplateVersion")
+  uploadedByUser  User?             @relation("TemplateUploadedBy", fields: [uploadedByUserId], references: [id], onDelete: SetNull)
+  activatedByUser User?             @relation("TemplateActivatedBy", fields: [activatedByUserId], references: [id], onDelete: SetNull)
+  receipts        Receipt[]
+  receiptArtifacts ReceiptArtifact[]
+
+  @@unique([schoolId, templateId, versionNumber])
+  @@unique([schoolId, id])
+  @@index([schoolId])
+  @@index([templateId])
+  @@map("receipt_template_versions")
+}
+
+// -------------------------------------------------------------
+// Receipt Artifact: Idempotent Rendered PDF Artifact Registry
+// -------------------------------------------------------------
+model ReceiptArtifact {
+  id                 String                @id @default(uuid())
+  schoolId           String
+  receiptId          String                @unique
+  templateVersionId  String?
+  status             ReceiptArtifactStatus @default(PENDING)
+  storagePath        String?
+  fileSize           Int?
+  checksumSha256     String?
+  generationAttempts Int                   @default(0)
+  lastAttemptAt      DateTime?
+  failureReason      String?
+  createdAt          DateTime              @default(now())
+  updatedAt          DateTime              @updatedAt
+
+  school          School                  @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  receipt         Receipt                 @relation(fields: [schoolId, receiptId], references: [schoolId, id], onDelete: Cascade)
+  templateVersion ReceiptTemplateVersion? @relation(fields: [schoolId, templateVersionId], references: [schoolId, id], onDelete: Restrict)
+
+  @@unique([schoolId, receiptId])
+  @@unique([schoolId, id])
+  @@index([schoolId])
+  @@index([receiptId])
+  @@map("receipt_artifacts")
+}
+
+// =============================================================
+// PHASE R2: SCHOOL-WISE CUSTOM RECEIPT NUMBERING CONFIGURATION
+// =============================================================
+
+enum AcademicYearFormat {
+  SHORT_6DIGIT      // e.g. 202627 (Default)
+  FULL_8DIGIT       // e.g. 20262027
+  START_YEAR_4DIGIT // e.g. 2026
+  NONE              // No academic year token
+}
+
+model SchoolReceiptNumberConfig {
+  id            String             @id @default(uuid())
+  schoolId      String             @unique
+  prefix        String             @default("RCT")
+  yearFormat    AcademicYearFormat @default(SHORT_6DIGIT)
+  paddingDigits Int                @default(5)
+  separator     String             @default("-")
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+
+  school School @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+
+  @@unique([schoolId, id])
+  @@index([schoolId])
+  @@map("school_receipt_number_configs")
+}
+
+// =============================================================
+// PHASE 3B: ATTENDANCE MANAGEMENT TIER
+// =============================================================
+
+enum AttendanceStatus {
+  PRESENT
+  ABSENT
+  LATE
+  HALF_DAY
+  EXCUSED
+}
+
+enum AttendanceType {
+  DAILY
+  PERIOD
+}
+
+enum RegisterStatus {
+  UNMARKED
+  PARTIALLY_MARKED
+  SUBMITTED
+  LOCKED
+}
+
+enum HolidayType {
+  PUBLIC_HOLIDAY
+  INSTITUTIONAL_HOLIDAY
+  VACATION
+  EMERGENCY_CLOSURE
+}
+
+model AttendanceRegister {
+  id             String         @id @default(uuid())
+  schoolId       String
+  academicYearId String
+  gradeId        String
+  sectionId      String
+  attendanceDate DateTime       @db.Date
+  attendanceType AttendanceType @default(DAILY)
+  periodNumber   Int            @default(0) // 0 = Full Day / Daily register; 1..N = Period slot
+  status         RegisterStatus @default(UNMARKED)
+
+  totalEnrolled Int @default(0)
+  totalPresent  Int @default(0)
+  totalAbsent   Int @default(0)
+  totalLate     Int @default(0)
+  totalHalfDay  Int @default(0)
+  totalExcused  Int @default(0)
+
+  submittedById String?
+  submittedAt   DateTime?
+  lockedById    String?
+  lockedAt      DateTime?
+  remarks       String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  school       School       @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  academicYear AcademicYear @relation(fields: [schoolId, academicYearId], references: [schoolId, id], onDelete: Cascade)
+  grade        GradeClass   @relation(fields: [schoolId, gradeId], references: [schoolId, id], onDelete: Restrict)
+  section      Section      @relation(fields: [schoolId, sectionId], references: [schoolId, id], onDelete: Restrict)
+  submittedBy  User?        @relation("RegisterSubmittedByUser", fields: [submittedById], references: [id], onDelete: SetNull)
+  lockedBy     User?        @relation("RegisterLockedByUser", fields: [lockedById], references: [id], onDelete: SetNull)
+
+  records StudentAttendance[]
+
+  @@unique([schoolId, id])
+  @@unique([schoolId, sectionId, attendanceDate, attendanceType, periodNumber])
+  @@index([schoolId, attendanceDate])
+  @@index([schoolId, gradeId, sectionId, attendanceDate])
+  @@index([schoolId, status])
+  @@map("attendance_registers")
+}
+
+model StudentAttendance {
+  id             String           @id @default(uuid())
+  schoolId       String
+  registerId     String?
+  studentId      String
+  academicYearId String
+  gradeId        String
+  sectionId      String
+  attendanceDate DateTime         @db.Date
+  attendanceType AttendanceType   @default(DAILY)
+  periodNumber   Int              @default(0) // 0 = Full Day / Daily register; 1..N = Period slot
+  status         AttendanceStatus
+  remarks        String?
+
+  markedById    String?
+  markedAt      DateTime  @default(now())
+  lastUpdatedBy String?
+  updatedAt     DateTime  @updatedAt
+
+  school       School              @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  register     AttendanceRegister? @relation(fields: [schoolId, registerId], references: [schoolId, id], onDelete: Cascade)
+  student      Student             @relation(fields: [schoolId, studentId], references: [schoolId, id], onDelete: Cascade)
+  academicYear AcademicYear        @relation(fields: [schoolId, academicYearId], references: [schoolId, id], onDelete: Cascade)
+  grade        GradeClass          @relation(fields: [schoolId, gradeId], references: [schoolId, id], onDelete: Restrict)
+  section      Section             @relation(fields: [schoolId, sectionId], references: [schoolId, id], onDelete: Restrict)
+  markedBy     User?               @relation("AttendanceMarkedByUser", fields: [markedById], references: [id], onDelete: SetNull)
+  updatedBy    User?               @relation("AttendanceUpdatedByUser", fields: [lastUpdatedBy], references: [id], onDelete: SetNull)
+
+  corrections AttendanceCorrectionLog[]
+
+  @@unique([schoolId, id])
+  @@unique([schoolId, studentId, attendanceDate, attendanceType, periodNumber])
+  @@index([schoolId, attendanceDate])
+  @@index([schoolId, studentId, attendanceDate])
+  @@index([schoolId, sectionId, attendanceDate, status])
+  @@index([schoolId, academicYearId, studentId])
+  @@map("student_attendance")
+}
+
+model AttendanceCorrectionLog {
+  id             String           @id @default(uuid())
+  schoolId       String
+  attendanceId   String
+  studentId      String
+  attendanceDate DateTime         @db.Date
+  previousStatus AttendanceStatus
+  newStatus      AttendanceStatus
+  reason         String
+  changedById    String
+  changedAt      DateTime         @default(now())
+
+  school     School            @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  attendance StudentAttendance @relation(fields: [schoolId, attendanceId], references: [schoolId, id], onDelete: Cascade)
+  student    Student           @relation(fields: [schoolId, studentId], references: [schoolId, id], onDelete: Cascade)
+  changedBy  User              @relation("CorrectionChangedByUser", fields: [changedById], references: [id], onDelete: Restrict)
+
+  @@unique([schoolId, id])
+  @@index([schoolId, attendanceId])
+  @@index([schoolId, studentId])
+  @@index([schoolId, changedAt])
+  @@map("attendance_correction_logs")
+}
+
+model SchoolHoliday {
+  id             String      @id @default(uuid())
+  schoolId       String
+  academicYearId String
+  holidayDate    DateTime    @db.Date
+  title          String
+  holidayType    HolidayType @default(PUBLIC_HOLIDAY)
+  description    String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  school       School       @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  academicYear AcademicYear @relation(fields: [schoolId, academicYearId], references: [schoolId, id], onDelete: Cascade)
+
+  @@unique([schoolId, id])
+  @@unique([schoolId, holidayDate])
+  @@index([schoolId, academicYearId, holidayDate])
+  @@map("school_holidays")
+}
+
+// =============================================================
+// PHASE 4: EXAMINATION & ASSESSMENT MANAGEMENT TIER
+// =============================================================
+
+enum AssessmentMode {
+  NORMAL_QUIZ
+  LIVE_EXAM
+}
+
+enum AssessmentStatus {
+  DRAFT
+  PUBLISHED
+  CLOSED
+  RESULTS_RELEASED
+  ARCHIVED
+}
+
+enum AttemptStatus {
+  IN_PROGRESS
+  SUBMITTED
+  TIMED_OUT
+}
+
+enum ImageArtifactStatus {
+  UPLOADED
+  ATTACHED
+  ORPHANED
+}
+
+enum ProgressionAssessmentStatus {
+  NOT_CONFIGURED
+  PENDING_OPEN
+  RESOLVED_SUBMITTED
+  RESOLVED_TIMED_OUT
+  MISSED_UNATTEMPTED
+  OVERRIDDEN
+}
+
+// -------------------------------------------------------------
+// 1. Assessment Chapter: Curriculum Syllabus Structure
+// -------------------------------------------------------------
+model AssessmentChapter {
+  id                 String   @id @default(uuid())
+  schoolId           String
+  academicYearId     String?
+  createdByTeacherId String?
+  gradeId            String
+  subject            String
+  chapterCode        String
+  title              String
+  orderIndex         Int      @default(0)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  school           School                         @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  academicYear     AcademicYear?                  @relation(fields: [schoolId, academicYearId], references: [schoolId, id], onDelete: Restrict)
+  grade            GradeClass                     @relation(fields: [schoolId, gradeId], references: [schoolId, id], onDelete: Restrict)
+  createdByTeacher Teacher?                       @relation("AuthoredChapters", fields: [schoolId, createdByTeacherId], references: [schoolId, id], onDelete: Restrict)
+  assessments      Assessment[]
+  progressions     StudentAssessmentProgression[]
+
+  @@unique([schoolId, id])
+  @@index([schoolId, academicYearId, gradeId, subject])
+  @@index([schoolId, createdByTeacherId])
+  @@map("assessment_chapters")
+}
+
+// -------------------------------------------------------------
+// 2. Assessment: Header & Execution Parameters
+// -------------------------------------------------------------
+model Assessment {
+  id               String           @id @default(uuid())
+  schoolId         String
+  academicYearId   String
+  gradeId          String
+  sectionId        String?
+  teacherId        String
+  chapterId        String?
+  title            String
+  description      String?
+  subject          String
+  mode             AssessmentMode   @default(NORMAL_QUIZ)
+  status           AssessmentStatus @default(DRAFT)
+  totalMarks       Decimal          @db.Decimal(6, 2)
+  passingMarks     Decimal          @db.Decimal(6, 2)
+  durationMinutes  Int
+  startWindowAt    DateTime?
+  endWindowAt      DateTime?
+  shuffleQuestions Boolean          @default(false)
+  shuffleOptions   Boolean          @default(false)
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  school       School             @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  academicYear AcademicYear       @relation(fields: [schoolId, academicYearId], references: [schoolId, id], onDelete: Restrict)
+  grade        GradeClass         @relation(fields: [schoolId, gradeId], references: [schoolId, id], onDelete: Restrict)
+  section      Section?           @relation(fields: [schoolId, sectionId], references: [schoolId, id], onDelete: Restrict)
+  teacher      Teacher            @relation(fields: [schoolId, teacherId], references: [schoolId, id], onDelete: Restrict)
+  chapter      AssessmentChapter? @relation(fields: [schoolId, chapterId], references: [schoolId, id], onDelete: Restrict)
+
+  sections       AssessmentSection[]
+  questions      AssessmentQuestion[]
+  imageArtifacts QuestionImageArtifact[]
+  attempts       AssessmentAttempt[]
+  answers        AttemptAnswer[]
+  results        AssessmentResult[]
+  progressions   StudentAssessmentProgression[]
+
+  @@unique([schoolId, id])
+  @@index([schoolId, status])
+  @@index([schoolId, gradeId, subject])
+  @@index([schoolId, academicYearId])
+  @@map("assessments")
+}
+
+// -------------------------------------------------------------
+// 3. Assessment Section: Paper Sections
+// -------------------------------------------------------------
+model AssessmentSection {
+  id           String   @id @default(uuid())
+  schoolId     String
+  assessmentId String
+  title        String
+  orderIndex   Int      @default(0)
+  instructions String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  school     School               @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  assessment Assessment           @relation(fields: [schoolId, assessmentId], references: [schoolId, id], onDelete: Restrict)
+  questions  AssessmentQuestion[]
+
+  @@unique([schoolId, id])
+  @@unique([assessmentId, id])
+  @@index([assessmentId, orderIndex])
+  @@map("assessment_sections")
+}
+
+// -------------------------------------------------------------
+// 4. Assessment Question: MCQ Questions & Keys
+// -------------------------------------------------------------
+model AssessmentQuestion {
+  id            String   @id @default(uuid())
+  schoolId      String
+  assessmentId  String
+  sectionId     String?
+  orderIndex    Int      @default(0)
+  questionText  String
+  options       Json
+  correctOption Int
+  marks         Decimal  @db.Decimal(5, 2)
+  explanation   String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  school        School                 @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  assessment    Assessment             @relation(fields: [schoolId, assessmentId], references: [schoolId, id], onDelete: Restrict)
+  section       AssessmentSection?     @relation(fields: [assessmentId, sectionId], references: [assessmentId, id], onDelete: Restrict)
+  imageArtifact QuestionImageArtifact?
+  answers       AttemptAnswer[]
+
+  @@unique([schoolId, id])
+  @@unique([assessmentId, id])
+  @@index([assessmentId, orderIndex])
+  @@map("assessment_questions")
+}
+
+// -------------------------------------------------------------
+// 5. Question Image Artifact: Question Diagram Registry
+// -------------------------------------------------------------
+model QuestionImageArtifact {
+  id             String              @id @default(uuid())
+  schoolId       String
+  assessmentId   String
+  questionId     String              @unique
+  fileName       String
+  fileSize       Int
+  mimeType       String
+  storagePath    String
+  checksumSha256 String
+  status         ImageArtifactStatus @default(UPLOADED)
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  school     School             @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  assessment Assessment         @relation(fields: [schoolId, assessmentId], references: [schoolId, id], onDelete: Restrict)
+  question   AssessmentQuestion @relation(fields: [assessmentId, questionId], references: [assessmentId, id], onDelete: Cascade)
+
+  @@unique([schoolId, id])
+  @@unique([assessmentId, questionId])
+  @@index([schoolId, status])
+  @@map("question_image_artifacts")
+}
+
+// -------------------------------------------------------------
+// 6. Assessment Attempt: Student Exam Session
+// -------------------------------------------------------------
+model AssessmentAttempt {
+  id           String        @id @default(uuid())
+  schoolId     String
+  assessmentId String
+  studentId    String
+  status       AttemptStatus @default(IN_PROGRESS)
+  startedAt    DateTime      @default(now())
+  deadlineAt   DateTime
+  submittedAt  DateTime?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  school     School            @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  assessment Assessment        @relation(fields: [schoolId, assessmentId], references: [schoolId, id], onDelete: Restrict)
+  student    Student           @relation(fields: [schoolId, studentId], references: [schoolId, id], onDelete: Restrict)
+  result     AssessmentResult?
+  answers    AttemptAnswer[]
+
+  @@unique([schoolId, id])
+  @@unique([assessmentId, studentId])
+  @@unique([assessmentId, id])
+  @@unique([assessmentId, id, studentId])
+  @@index([schoolId, studentId])
+  @@index([assessmentId, status])
+  @@map("assessment_attempts")
+}
+
+// -------------------------------------------------------------
+// 7. Attempt Answer: Recorded Question Selections
+// -------------------------------------------------------------
+model AttemptAnswer {
+  id             String             @id @default(uuid())
+  schoolId       String
+  assessmentId   String
+  attemptId      String
+  questionId     String
+  selectedOption Int?
+  metadata       Json?
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+
+  school     School             @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  assessment Assessment         @relation(fields: [schoolId, assessmentId], references: [schoolId, id], onDelete: Cascade)
+  attempt    AssessmentAttempt  @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  question   AssessmentQuestion @relation(fields: [questionId], references: [id], onDelete: Restrict)
+
+  @@unique([schoolId, id])
+  @@unique([attemptId, questionId])
+  @@index([assessmentId, attemptId])
+  @@index([assessmentId, questionId])
+  @@map("attempt_answers")
+}
+
+// -------------------------------------------------------------
+// 8. Assessment Result: Immutable Scoring Summary
+// -------------------------------------------------------------
+model AssessmentResult {
+  id                 String            @id @default(uuid())
+  schoolId           String
+  assessmentId       String
+  attemptId          String            @unique
+  studentId          String
+  totalQuestions     Int
+  attemptedQuestions Int
+  correctAnswers     Int
+  incorrectAnswers   Int
+  score              Decimal           @db.Decimal(6, 2)
+  percentage         Decimal           @db.Decimal(5, 2)
+  isPassing          Boolean
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+
+  school     School            @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  assessment Assessment        @relation(fields: [schoolId, assessmentId], references: [schoolId, id], onDelete: Restrict)
+  attempt    AssessmentAttempt @relation(fields: [assessmentId, attemptId, studentId], references: [assessmentId, id, studentId], onDelete: Restrict)
+  student    Student           @relation(fields: [schoolId, studentId], references: [schoolId, id], onDelete: Restrict)
+
+  @@unique([schoolId, id])
+  @@unique([assessmentId, attemptId, studentId])
+  @@unique([assessmentId, attemptId])
+  @@index([schoolId, assessmentId])
+  @@index([schoolId, studentId])
+  @@map("assessment_results")
+}
+
+// -------------------------------------------------------------
+// 9. Student Assessment Progression: Syllabus Gating State
+// -------------------------------------------------------------
+model StudentAssessmentProgression {
+  id           String                      @id @default(uuid())
+  schoolId     String
+  studentId    String
+  assessmentId String
+  chapterId    String?
+  status       ProgressionAssessmentStatus @default(NOT_CONFIGURED)
+  unlockedAt   DateTime?
+  createdAt    DateTime                    @default(now())
+  updatedAt    DateTime                    @updatedAt
+
+  school     School              @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  student    Student             @relation(fields: [schoolId, studentId], references: [schoolId, id], onDelete: Cascade)
+  assessment Assessment          @relation(fields: [schoolId, assessmentId], references: [schoolId, id], onDelete: Cascade)
+  chapter    AssessmentChapter?  @relation(fields: [schoolId, chapterId], references: [schoolId, id], onDelete: Restrict)
+
+  @@unique([schoolId, id])
+  @@unique([studentId, assessmentId])
+  @@index([schoolId, studentId, chapterId])
+  @@map("student_assessment_progressions")
+}
+
+// -------------------------------------------------------------
+// 10. School Examination Setting: Tenant-Scoped Leaderboard Privacy
+// -------------------------------------------------------------
+model SchoolExaminationSetting {
+  id                             String   @id @default(uuid())
+  schoolId                       String   @unique
+  showStudentNamesOnLeaderboards Boolean  @default(false)
+  updatedByUserId                String?
+  createdAt                      DateTime @default(now())
+  updatedAt                      DateTime @updatedAt
+
+  school School @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+
+  @@map("school_examination_settings")
+}
+
+// -------------------------------------------------------------
+// 11. Database Backup Logs: Audit Trail for Backup Operations
+// -------------------------------------------------------------
+model DatabaseBackupLog {
+  id              String    @id @default(uuid())
+  backupId        String    @unique
+  startedAt       DateTime
+  completedAt     DateTime?
+  status          String
+  durationMs      Int?
+  sizeBytes       BigInt?
+  sha256          String?
+  isEncrypted     Boolean   @default(true)
+  isFullSystem    Boolean   @default(true)
+  schoolId        String?
+  backupPath      String?
+  metadataPath    String?
+  failureCategory String?
+  errorMessage    String?
+  retentionStatus String?
+  createdAt       DateTime  @default(now())
+
+  @@index([startedAt])
+  @@index([status])
+  @@index([retentionStatus])
+  @@map("database_backup_logs")
+}
+
+// -------------------------------------------------------------
+// 12. Authentication Sessions, Password Resets, and Auth Audit Logs
+// -------------------------------------------------------------
+model UserSession {
+  id               String    @id @default(uuid())
+  userId           String
+  schoolId         String?
+  tokenFamily      String
+  refreshTokenHash String
+  deviceInfo       String?
+  ipAddress        String?
+  expiresAt        DateTime
+  lastUsedAt       DateTime  @default(now())
+  isRevoked        Boolean   @default(false)
+  revokedAt        DateTime?
+  revokedReason    String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @default(now()) @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@index([userId, isRevoked])
+  @@index([tokenFamily])
+  @@index([refreshTokenHash])
+  @@map("user_sessions")
+}
+
+model PasswordResetToken {
+  id        String    @id @default(uuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@index([userId, expiresAt])
+  @@map("password_reset_tokens")
+}
+
+model AuthAuditLog {
+  id        String   @id @default(uuid())
+  userId    String?
+  schoolId  String?
+  email     String
+  eventType String
+  ipAddress String?
+  userAgent String?
+  details   Json?
+  createdAt DateTime @default(now())
+
+  @@index([email, createdAt])
+  @@index([schoolId, createdAt])
+  @@map("auth_audit_logs")
+}
+

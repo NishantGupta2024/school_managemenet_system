@@ -73,16 +73,18 @@ export class SmtpEmailProvider extends EmailProvider {
     const boundary = `----=_Part_${Date.now()}_${crypto.randomBytes(8).toString('hex')}`;
 
     // Construct MIME multipart/alternative payload
-    const mimeLines = [
+    const headers = [
       `From: "${fromName.replace(/"/g, '')}" <${fromAddress}>`,
       `To: ${options.toName ? `"${options.toName.replace(/"/g, '')}" <${options.to}>` : options.to}`,
       `Subject: ${options.subject}`,
       `Date: ${new Date().toUTCString()}`,
       `Message-ID: ${messageId}`,
-      options.replyTo ? `Reply-To: ${options.replyTo}` : '',
+      options.replyTo ? `Reply-To: ${options.replyTo}` : null,
       'MIME-Version: 1.0',
       `Content-Type: multipart/alternative; boundary="${boundary}"`,
-      '',
+    ].filter(Boolean);
+
+    const bodyParts = [
       `--${boundary}`,
       'Content-Type: text/plain; charset=utf-8',
       'Content-Transfer-Encoding: 7bit',
@@ -96,10 +98,9 @@ export class SmtpEmailProvider extends EmailProvider {
       options.htmlBody || options.textBody || '',
       '',
       `--${boundary}--`,
-      '',
-    ].filter(Boolean);
+    ];
 
-    const emailContent = mimeLines.join('\r\n');
+    const emailContent = headers.join('\r\n') + '\r\n\r\n' + bodyParts.join('\r\n');
 
     try {
       const session = this.sessionFactory

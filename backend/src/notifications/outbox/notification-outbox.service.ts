@@ -701,4 +701,196 @@ export class NotificationOutboxService {
       skipReason: null,
     };
   }
+
+  /**
+   * Enqueues a STUDENT_ADMITTED outbox record inside the caller's Prisma transaction.
+   */
+  async enqueueStudentAdmitted(
+    tx: Prisma.TransactionClient,
+    params: {
+      schoolId: string;
+      student: {
+        id: string;
+        firstName: string;
+        lastName: string;
+        admissionNumber: string;
+        guardianEmail?: string | null;
+        guardianName?: string | null;
+        admissionDate?: Date | string;
+        grade?: { name: string } | null;
+        section?: { name: string } | null;
+        academicYear?: { name: string } | null;
+      };
+      school?: {
+        name: string;
+      } | null;
+    },
+  ) {
+    const { schoolId, student } = params;
+
+    const schoolSetting = await tx.schoolNotificationSetting.findUnique({
+      where: { schoolId },
+    });
+    const admissionEmailEnabled = schoolSetting
+      ? ((schoolSetting as any).studentAdmissionEmailEnabled ?? true)
+      : true;
+
+    let school = params.school;
+    if (!school) {
+      school = await tx.school.findUnique({
+        where: { id: schoolId },
+        select: { name: true },
+      });
+    }
+
+    const candidateEmail = student.guardianEmail?.trim()?.toLowerCase() || null;
+    const isValidEmail = candidateEmail && validateEmailAddress(candidateEmail);
+    const candidateName = student.guardianName?.trim() || `${student.firstName} ${student.lastName}`.trim();
+
+    let isSkipped = false;
+    let skipReason: string | null = null;
+
+    if (!isValidEmail) {
+      isSkipped = true;
+      skipReason = 'NO_VALID_GUARDIAN_EMAIL';
+    } else if (!admissionEmailEnabled) {
+      isSkipped = true;
+      skipReason = 'EVENT_DISABLED_BY_SCHOOL_SETTING:studentAdmissionEmailEnabled';
+    }
+
+    const admissionDateStr =
+      student.admissionDate instanceof Date
+        ? student.admissionDate.toISOString().split('T')[0]
+        : String(student.admissionDate || new Date().toISOString()).split('T')[0];
+
+    const templateData = {
+      schoolName: school?.name || 'School',
+      studentName: `${student.firstName} ${student.lastName}`.trim(),
+      admissionNumber: student.admissionNumber,
+      gradeName: student.grade?.name,
+      sectionName: student.section?.name,
+      academicYearName: student.academicYear?.name,
+      admissionDate: admissionDateStr,
+      guardianName: student.guardianName || undefined,
+    };
+
+    const idempotencyKey = `STUDENT_ADMITTED:${schoolId}:${student.id}:${student.admissionNumber}`;
+
+    return await this.createOutboxRecordSafely(tx, {
+      schoolId,
+      channel: NotificationChannel.EMAIL,
+      eventType: 'STUDENT_ADMITTED' as any,
+      recipientEmail: isValidEmail ? candidateEmail : null,
+      recipientName: candidateName,
+      idempotencyKey,
+      status: isSkipped ? NotificationStatus.SKIPPED : NotificationStatus.PENDING,
+      skipReason,
+      skippedAt: isSkipped ? new Date() : null,
+      templateKey: 'STUDENT_ADMITTED',
+      templateData: templateData as any,
+    });
+  }
+
+  /**
+   * Enqueues batch ATTENDANCE_ABSENT outbox records inside caller's transaction.
+   */
+  async enqueueAttendanceAbsentBatch(
+    tx: Prisma.TransactionClient,
+    params: {
+      schoolId: string;
+      attendanceDate: string;
+      records: Array<{
+        studentId: string;
+        studentName: string;
+        admissionNumber: string;
+        recipientEmail?: string | null;
+        recipientName?: string | null;
+        gradeName?: string;
+        sectionName?: string;
+      }>;
+      schoolName: string;
+    },
+  ) {
+    const { schoolId, attendanceDate, records, schoolName } = params;
+    if (!records || records.length === 0) return [];
+
+    const schoolSetting = await tx.schoolNotificationSetting.findUnique({
+      where: { schoolId },
+    });
+    const absenceEmailEnabled = schoolSetting
+      ? ((schoolSetting as any).attendanceAbsenceEmailEnabled ?? false)
+      : false;
+
+    const results = [];
+
+    for (const rec of records) {
+      const candidateEmail = rec.recipientEmail?.trim()?.toLowerCase() || null;
+      const isValidEmail = candidateEmail && validateEmailAddress(candidateEmail);
+
+      let isSkipped = false;
+      let skipReason: string | null = null;
+
+      if (!isValidEmail) {
+        isSkipped = true;
+        skipReason = 'NO_VALID_PARENT_EMAIL';
+      } else if (!absenceEmailEnabled) {
+        isSkipped = true;
+        skipReason = 'EVENT_DISABLED_BY_SCHOOL_SETTING:attendanceAbsenceEmailEnabled';
+      }
+
+      const idempotencyKey = `ATTENDANCE_ABSENT:${schoolId}:${rec.studentId}:${attendanceDate}`;
+
+      const templateData = {
+        schoolName,
+        studentName: rec.studentName,
+        admissionNumber: rec.admissionNumber,
+        gradeName: rec.gradeName,
+        sectionName: rec.sectionName,
+        attendanceDate,
+      };
+
+      const outbox = await this.createOutboxRecordSafely(tx, {
+        schoolId,
+        channel: NotificationChannel.EMAIL,
+        eventType: 'ATTENDANCE_ABSENT' as any,
+        recipientEmail: isValidEmail ? candidateEmail : null,
+        recipientName: rec.recipientName || rec.studentName,
+        idempotencyKey,
+        status: isSkipped ? NotificationStatus.SKIPPED : NotificationStatus.PENDING,
+        skipReason,
+        skippedAt: isSkipped ? new Date() : null,
+        templateKey: 'ATTENDANCE_ABSENT',
+        templateData: templateData as any,
+      });
+
+      results.push(outbox);
+    }
+
+    return results;
+  }
+
+  /**
+   * Cancels any pending ATTENDANCE_ABSENT notification if attendance is corrected from ABSENT to PRESENT/EXCUSED before delivery.
+   */
+  async cancelPendingAttendanceAbsent(
+    tx: Prisma.TransactionClient,
+    schoolId: string,
+    studentId: string,
+    attendanceDate: string,
+  ) {
+    const idempotencyKey = `ATTENDANCE_ABSENT:${schoolId}:${studentId}:${attendanceDate}`;
+
+    return tx.notificationOutbox.updateMany({
+      where: {
+        schoolId,
+        idempotencyKey,
+        status: NotificationStatus.PENDING,
+      },
+      data: {
+        status: NotificationStatus.CANCELLED,
+        skippedAt: new Date(),
+        skipReason: 'ATTENDANCE_CORRECTED_BEFORE_DELIVERY',
+      },
+    });
+  }
 }

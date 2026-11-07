@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import App from './App';
 
 vi.mock('./services/api', () => ({
@@ -14,6 +15,31 @@ vi.mock('./services/api', () => ({
   },
   setActiveSchoolId: vi.fn(),
   setOnUnauthorized: vi.fn(),
+  academicsApi: {
+    getAcademicYears: vi.fn().mockResolvedValue([
+      {
+        id: 'y26',
+        name: '2026-2027',
+        startDate: '2026-04-01T00:00:00.000Z',
+        endDate: '2027-03-31T00:00:00.000Z',
+        isCurrent: true,
+        status: 'ACTIVE',
+      },
+    ]),
+    getGrades: vi.fn().mockResolvedValue([
+      { id: 'g10', name: 'Grade 10', code: 'G10', displayOrder: 1, sections: [] },
+    ]),
+  },
+  studentsApi: {
+    getStudents: vi.fn().mockResolvedValue({
+      data: [],
+      meta: { total: 1, page: 1, limit: 10, totalPages: 1 },
+    }),
+    getStudentById: vi.fn(),
+    getStudentProfile: vi.fn(),
+    createStudent: vi.fn(),
+    updateStudent: vi.fn(),
+  },
   authApi: {
     login: vi.fn(),
     logout: vi.fn(),
@@ -324,19 +350,31 @@ vi.mock('./services/api', () => ({
   },
 }));
 
+const renderAppFeeWorkspace = () => {
+  return render(
+    <MemoryRouter initialEntries={['/app/fees']}>
+      <App />
+    </MemoryRouter>,
+  );
+};
+
 describe('App Component', () => {
   it('renders application header and title', async () => {
-    render(<App />);
-    const titleElements = await screen.findAllByText(/School Fee Management System/i);
+    render(
+      <MemoryRouter initialEntries={['/app']}>
+        <App />
+      </MemoryRouter>,
+    );
+    const titleElements = await screen.findAllByText(/School ERP/i);
     expect(titleElements.length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByText(/Phase 1 Architecture Foundation Completed/i)).toBeInTheDocument();
     await waitFor(() => {
-      expect(screen.getByText(/Greenwood Intl Academy/i)).toBeInTheDocument();
+      expect(screen.getAllByText(/Greenwood Intl Academy/i).length).toBeGreaterThanOrEqual(1);
+      expect(screen.getAllByText(/Admin User/i).length).toBeGreaterThanOrEqual(1);
     });
   });
 
-  it('renders infrastructure telemetry cards', async () => {
-    render(<App />);
+  it('renders infrastructure telemetry cards in fee workspace', async () => {
+    renderAppFeeWorkspace();
     expect(await screen.findByText(/System Health & Infrastructure Telemetry/i)).toBeInTheDocument();
     expect(screen.getByText(/Frontend Tier/i)).toBeInTheDocument();
     const gatewayElements = screen.getAllByText(/API Gateway/i);
@@ -347,20 +385,17 @@ describe('App Component', () => {
     });
   });
 
-  it('renders Phase Foundation deliverables checklist', async () => {
-    render(<App />);
-    expect(await screen.findByText(/Phase Foundation & Fee Engine Deliverables/i)).toBeInTheDocument();
-    expect(screen.getByText(/Clean Monorepo Workspace/i)).toBeInTheDocument();
-    expect(screen.getByText(/Tenant Context Isolation/i)).toBeInTheDocument();
-    await waitFor(() => {
-      expect(screen.getByText(/Monthly Invoicing Engine \(Phase 2C\)/i)).toBeInTheDocument();
-    });
+  it('renders Fee Management workspace overview banner', async () => {
+    renderAppFeeWorkspace();
+    expect(await screen.findByText(/Fee Engine & Financial Ledger Active/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/Fee Management Workspace/i).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText(/Automated monthly invoicing, cashier collections/i)).toBeInTheDocument();
   });
 
   it('navigates to Fee Heads tab when clicked', async () => {
-    render(<App />);
-    const tabBtn = await screen.findByRole('button', { name: /^Fee Heads$/i });
-    fireEvent.click(tabBtn);
+    renderAppFeeWorkspace();
+    const tabBtns = await screen.findAllByRole('button', { name: /^Fee Heads$/i });
+    fireEvent.click(tabBtns[0]);
 
     await waitFor(() => {
       expect(screen.getByText(/Fee Head Catalog/i)).toBeInTheDocument();
@@ -370,9 +405,9 @@ describe('App Component', () => {
   });
 
   it('navigates to Fee Structures tab when clicked', async () => {
-    render(<App />);
-    const tabBtn = await screen.findByRole('button', { name: /^Fee Structures$/i });
-    fireEvent.click(tabBtn);
+    renderAppFeeWorkspace();
+    const tabBtns = await screen.findAllByRole('button', { name: /^Fee Structures$/i });
+    fireEvent.click(tabBtns[0]);
 
     await waitFor(() => {
       expect(screen.getByText(/Class-Wise Fee Structures/i)).toBeInTheDocument();
@@ -381,7 +416,7 @@ describe('App Component', () => {
   });
 
   it('navigates to Student Allocations tab when clicked', async () => {
-    render(<App />);
+    renderAppFeeWorkspace();
     const tabBtn = await screen.findByRole('button', { name: /^Student Allocations$/i });
     fireEvent.click(tabBtn);
 
@@ -393,8 +428,8 @@ describe('App Component', () => {
   });
 
   it('navigates to Monthly Invoicing tab when clicked', async () => {
-    render(<App />);
-    await screen.findByText(/Phase Foundation & Fee Engine Deliverables/i);
+    renderAppFeeWorkspace();
+    await screen.findByText(/Fee Engine & Financial Ledger Active/i);
     const tabBtns = screen.getAllByRole('button', { name: /Monthly Invoicing/i });
     fireEvent.click(tabBtns[0]);
 
@@ -405,8 +440,8 @@ describe('App Component', () => {
   });
 
   it('navigates to Fee Statements tab when clicked', async () => {
-    render(<App />);
-    await screen.findByText(/Phase Foundation & Fee Engine Deliverables/i);
+    renderAppFeeWorkspace();
+    await screen.findByText(/Fee Engine & Financial Ledger Active/i);
     const tabBtns = screen.getAllByRole('button', { name: /Fee Statements/i });
     fireEvent.click(tabBtns[0]);
 
@@ -417,8 +452,8 @@ describe('App Component', () => {
   });
 
   it('navigates to Excel Imports tab when clicked', async () => {
-    render(<App />);
-    await screen.findByText(/Phase Foundation & Fee Engine Deliverables/i);
+    renderAppFeeWorkspace();
+    await screen.findByText(/Fee Engine & Financial Ledger Active/i);
     const tabBtns = screen.getAllByRole('button', { name: /Excel Imports/i });
     fireEvent.click(tabBtns[0]);
 
@@ -430,8 +465,8 @@ describe('App Component', () => {
   });
 
   it('navigates to Fine Rules tab when clicked', async () => {
-    render(<App />);
-    await screen.findByText(/Phase Foundation & Fee Engine Deliverables/i);
+    renderAppFeeWorkspace();
+    await screen.findByText(/Fee Engine & Financial Ledger Active/i);
     const tabBtns = screen.getAllByRole('button', { name: /Fine Rules/i });
     fireEvent.click(tabBtns[0]);
 
@@ -443,8 +478,8 @@ describe('App Component', () => {
   });
 
   it('navigates to Fee Reports tab when clicked', async () => {
-    render(<App />);
-    await screen.findByText(/Phase Foundation & Fee Engine Deliverables/i);
+    renderAppFeeWorkspace();
+    await screen.findByText(/Fee Engine & Financial Ledger Active/i);
     const tabBtns = screen.getAllByRole('button', { name: /Fee Reports/i });
     fireEvent.click(tabBtns[0]);
 
@@ -457,8 +492,8 @@ describe('App Component', () => {
   });
 
   it('navigates to Payments & Receipts tab when clicked', async () => {
-    render(<App />);
-    await screen.findByText(/Phase Foundation & Fee Engine Deliverables/i);
+    renderAppFeeWorkspace();
+    await screen.findByText(/Fee Engine & Financial Ledger Active/i);
     const tabBtns = screen.getAllByRole('button', { name: /Payments & Receipts/i });
     fireEvent.click(tabBtns[0]);
 

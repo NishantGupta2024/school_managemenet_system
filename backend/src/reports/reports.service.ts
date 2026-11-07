@@ -7,6 +7,7 @@ import {
   AllocationType,
   FeeHeadCategory,
   InvoiceStatus,
+  OnlinePaymentStatus,
   PaymentMethod,
   PaymentStatus,
   Prisma,
@@ -27,6 +28,12 @@ import {
 import { ClassCollectionQueryDto } from './dto/class-collection-query.dto';
 import { FineSummaryQueryDto } from './dto/fine-summary-query.dto';
 import { ReportType } from './dto/report-config.dto';
+import {
+  GatewayReconciliationQueryDto,
+  ReconciliationFilterStatus,
+} from './dto/gateway-reconciliation-query.dto';
+import { BILLING_MONTH_NAMES } from '../fee-generation/fee-generation.service';
+import { SAFE_RECEIPT_SELECT } from '../payments/payments.service';
 
 export interface MethodSummary {
   method: PaymentMethod;
@@ -1572,7 +1579,7 @@ export class ReportsService {
     const payments = await this.prisma.payment.findMany({
       where: paymentsWhere,
       include: {
-        receipt: true,
+        receipt: { select: SAFE_RECEIPT_SELECT },
         student: {
           include: { grade: true, section: true },
         },
@@ -2002,5 +2009,196 @@ export class ReportsService {
    */
   public getTodayIsoInTimezone(timeZone: string = 'Asia/Kolkata'): string {
     return this.formatDateInTimezone(new Date(), timeZone);
+  }
+
+  /**
+   * Generates a tenant-scoped Online Payment Gateway Reconciliation Report.
+   *
+   * Formulates an authoritative accounting trace distinguishing:
+   * 1. Total provider-captured amounts.
+   * 2. Amounts allocated to invoices.
+   * 3. Unallocated surplus requiring institutional reconciliation.
+   * 4. Succeeded refunds on payments.
+   * 5. Unresolved surplus awaiting action.
+   */
+  async getGatewayReconciliationReport(
+    school: School,
+    query: GatewayReconciliationQueryDto,
+  ) {
+    const timeZone = school.timezone || 'Asia/Kolkata';
+
+    let dateWhere: Prisma.DateTimeFilter | undefined;
+    if (query.startDate || query.endDate) {
+      const startUtc = query.startDate
+        ? this.getLocalDayBoundariesUtc(query.startDate, timeZone).startUtc
+        : new Date(0);
+      const endUtc = query.endDate
+        ? this.getLocalDayBoundariesUtc(query.endDate, timeZone).endUtc
+        : new Date('2099-12-31T23:59:59.999Z');
+      dateWhere = { gte: startUtc, lte: endUtc };
+    }
+
+    const whereClause: Prisma.OnlinePaymentOrderWhereInput = {
+      schoolId: school.id,
+      status: OnlinePaymentStatus.SUCCESS,
+      ...(query.academicYearId ? { academicYearId: query.academicYearId } : {}),
+      ...(dateWhere ? { verifiedAt: dateWhere } : {}),
+    };
+
+    const orders = await this.prisma.onlinePaymentOrder.findMany({
+      where: whereClause,
+      include: {
+        student: {
+          include: { grade: true, section: true },
+        },
+        invoice: true,
+        payment: {
+          include: {
+            receipt: { select: SAFE_RECEIPT_SELECT },
+            refunds: true,
+          },
+        },
+      },
+      orderBy: { verifiedAt: 'desc' },
+    });
+
+    let totalCaptured = new Prisma.Decimal(0);
+    let totalAllocated = new Prisma.Decimal(0);
+    let totalSurplus = new Prisma.Decimal(0);
+    let totalRefunded = new Prisma.Decimal(0);
+    let unresolvedSurplus = new Prisma.Decimal(0);
+    let resolvedSurplus = new Prisma.Decimal(0);
+
+    const transactions = [];
+
+    for (const order of orders) {
+      const meta: any =
+        typeof order.metadata === 'object' && order.metadata !== null
+          ? order.metadata
+          : {};
+      const capturedAmount = new Prisma.Decimal(order.amount);
+      const allocatedAmount = order.payment
+        ? new Prisma.Decimal(order.payment.amount)
+        : new Prisma.Decimal(meta.allocatedAmount || 0);
+      const surplusAmount = new Prisma.Decimal(meta.surplusAmount || 0);
+
+      let refundedOnOrder = new Prisma.Decimal(0);
+      if (order.payment?.refunds) {
+        for (const ref of order.payment.refunds) {
+          if (ref.status === RefundStatus.SUCCEEDED) {
+            refundedOnOrder = refundedOnOrder.add(ref.refundAmount);
+          }
+        }
+      }
+
+      const hasSurplus = surplusAmount.greaterThan(0);
+      const isResolved = hasSurplus && meta.reconciliationStatus === 'RESOLVED';
+      const isUnresolved = hasSurplus && !isResolved;
+
+      totalCaptured = totalCaptured.add(capturedAmount);
+      totalAllocated = totalAllocated.add(allocatedAmount);
+      totalSurplus = totalSurplus.add(surplusAmount);
+      totalRefunded = totalRefunded.add(refundedOnOrder);
+
+      if (isResolved) {
+        resolvedSurplus = resolvedSurplus.add(surplusAmount);
+      } else if (isUnresolved) {
+        unresolvedSurplus = unresolvedSurplus.add(surplusAmount);
+      }
+
+      if (
+        query.status === ReconciliationFilterStatus.UNRESOLVED_ONLY &&
+        !isUnresolved
+      ) {
+        continue;
+      }
+      if (
+        query.status === ReconciliationFilterStatus.RESOLVED_ONLY &&
+        !isResolved
+      ) {
+        continue;
+      }
+
+      transactions.push({
+        orderId: order.id,
+        providerOrderId: order.providerOrderId,
+        providerPaymentId: order.providerPaymentId,
+        paymentNumber:
+          order.payment?.paymentNumber || meta.paymentNumber || null,
+        receiptNumber:
+          order.payment?.receipt?.receiptNumber || meta.receiptNumber || null,
+        capturedAmount: Number(capturedAmount.toFixed(2)),
+        allocatedAmount: Number(allocatedAmount.toFixed(2)),
+        surplusAmount: Number(surplusAmount.toFixed(2)),
+        refundedAmount: Number(refundedOnOrder.toFixed(2)),
+        settlementType: meta.settlementType || 'FULL_SETTLEMENT',
+        reconciliationStatus:
+          meta.reconciliationStatus ||
+          (isUnresolved ? 'PENDING_RECONCILIATION' : 'RESOLVED'),
+        reconciliationReason:
+          meta.surplusReason || order.failureReason || null,
+        verifiedAt: order.verifiedAt || order.updatedAt,
+        student: {
+          id: order.student.id,
+          admissionNumber: order.student.admissionNumber,
+          name: `${order.student.firstName} ${order.student.lastName || ''}`.trim(),
+          grade: order.student.grade?.name || null,
+          section: order.student.section?.name || null,
+        },
+        invoice: {
+          id: order.invoice.id,
+          billingMonth: order.invoice.billingMonth,
+          monthName:
+            BILLING_MONTH_NAMES[order.invoice.billingMonth - 1] ||
+            `Month ${order.invoice.billingMonth}`,
+          status: order.invoice.status,
+          netAmount: Number(new Prisma.Decimal(order.invoice.netAmount).toFixed(2)),
+        },
+        resolution: isResolved
+          ? {
+              action: meta.resolutionAction,
+              notes: meta.resolutionNotes,
+              externalRef: meta.resolutionExternalRef || null,
+              resolvedBy:
+                meta.resolvedByUserName || meta.resolvedByUserId || null,
+              resolvedAt: meta.resolvedAt,
+            }
+          : null,
+      });
+    }
+
+    return {
+      school: {
+        id: school.id,
+        name: school.name,
+        currency: school.currency,
+        timezone: timeZone,
+      },
+      filters: {
+        startDate: query.startDate || null,
+        endDate: query.endDate || null,
+        academicYearId: query.academicYearId || null,
+        status: query.status || ReconciliationFilterStatus.ALL,
+      },
+      summary: {
+        totalCapturedAmount: Number(totalCaptured.toFixed(2)),
+        totalAllocatedAmount: Number(totalAllocated.toFixed(2)),
+        totalSurplusAmount: Number(totalSurplus.toFixed(2)),
+        totalRefundedAmount: Number(totalRefunded.toFixed(2)),
+        unresolvedSurplusAmount: Number(unresolvedSurplus.toFixed(2)),
+        resolvedSurplusAmount: Number(resolvedSurplus.toFixed(2)),
+        ordersCount: orders.length,
+        surplusOrdersCount: orders.filter((o) => {
+          const m: any = o.metadata || {};
+          return Number(m.surplusAmount || 0) > 0;
+        }).length,
+        unresolvedOrdersCount: orders.filter((o) => {
+          const m: any = o.metadata || {};
+          const s = Number(m.surplusAmount || 0);
+          return s > 0 && m.reconciliationStatus !== 'RESOLVED';
+        }).length,
+      },
+      transactions,
+    };
   }
 }

@@ -12,6 +12,10 @@ export function setActiveSchoolId(schoolId: string | null) {
   activeSchoolId = schoolId;
 }
 
+export function getActiveSchoolId(): string | null {
+  return activeSchoolId;
+}
+
 export function setOnUnauthorized(handler: (() => void) | null) {
   onUnauthorizedHandler = handler;
 }
@@ -22,6 +26,7 @@ export const UserRole = {
   FEE_STAFF: 'FEE_STAFF',
   STUDENT: 'STUDENT',
   PARENT: 'PARENT',
+  TEACHER: 'TEACHER',
 } as const;
 
 export type UserRole = (typeof UserRole)[keyof typeof UserRole];
@@ -54,16 +59,89 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
-// Response interceptor: global 401 handling for expired/invalid sessions
+// Response interceptor: global 401 handling with automatic refresh token retry
+let isRefreshing = false;
+let failedQueue: Array<{
+  resolve: (value?: any) => void;
+  reject: (reason?: any) => void;
+}> = [];
+
+const processQueue = (error: any, token: string | null = null) => {
+  failedQueue.forEach((prom) => {
+    if (error) {
+      prom.reject(error);
+    } else {
+      prom.resolve(token);
+    }
+  });
+  failedQueue = [];
+};
+
 api.interceptors.response.use(
   (response) => response,
-  (error) => {
-    const isLoginRequest = error.config?.url?.includes('/auth/login');
-    if (error.response?.status === 401 && !isLoginRequest) {
-      localStorage.removeItem('auth_token');
-      localStorage.removeItem('auth_user');
-      if (onUnauthorizedHandler) {
-        onUnauthorizedHandler();
+  async (error) => {
+    const originalRequest = error.config;
+    const isAuthEndpoint =
+      originalRequest?.url?.includes('/auth/login') ||
+      originalRequest?.url?.includes('/auth/refresh') ||
+      originalRequest?.url?.includes('/auth/forgot-password') ||
+      originalRequest?.url?.includes('/auth/reset-password');
+
+    if (error.response?.status === 401 && !isAuthEndpoint && !originalRequest._retry) {
+      const storedRefreshToken = localStorage.getItem('auth_refresh_token');
+
+      if (storedRefreshToken) {
+        if (isRefreshing) {
+          return new Promise((resolve, reject) => {
+            failedQueue.push({ resolve, reject });
+          })
+            .then((token) => {
+              originalRequest.headers.Authorization = `Bearer ${token}`;
+              return api(originalRequest);
+            })
+            .catch((err) => Promise.reject(err));
+        }
+
+        originalRequest._retry = true;
+        isRefreshing = true;
+
+        try {
+          const res = await axios.post(
+            `${import.meta.env.VITE_API_BASE_URL || '/api/v1'}/auth/refresh`,
+            { refreshToken: storedRefreshToken },
+            { headers: { 'Content-Type': 'application/json' } },
+          );
+
+          const { accessToken, refreshToken: newRefreshToken } = res.data;
+          localStorage.setItem('auth_token', accessToken);
+          if (newRefreshToken) {
+            localStorage.setItem('auth_refresh_token', newRefreshToken);
+          }
+
+          api.defaults.headers.common.Authorization = `Bearer ${accessToken}`;
+          processQueue(null, accessToken);
+
+          originalRequest.headers.Authorization = `Bearer ${accessToken}`;
+          return api(originalRequest);
+        } catch (refreshErr) {
+          processQueue(refreshErr, null);
+          localStorage.removeItem('auth_token');
+          localStorage.removeItem('auth_refresh_token');
+          localStorage.removeItem('auth_user');
+          if (onUnauthorizedHandler) {
+            onUnauthorizedHandler();
+          }
+          return Promise.reject(refreshErr);
+        } finally {
+          isRefreshing = false;
+        }
+      } else {
+        localStorage.removeItem('auth_token');
+        localStorage.removeItem('auth_refresh_token');
+        localStorage.removeItem('auth_user');
+        if (onUnauthorizedHandler) {
+          onUnauthorizedHandler();
+        }
       }
     }
     // 403 Forbidden is NOT treated as an expired session; let callers handle permission rejection
@@ -102,11 +180,30 @@ export interface FeeStructureItem {
   feeHead?: FeeHead;
 }
 
+export interface Section {
+  id: string;
+  schoolId: string;
+  gradeId: string;
+  name: string;
+  capacity: number;
+  createdAt?: string;
+  updatedAt?: string;
+  _count?: {
+    students: number;
+  };
+}
+
 export interface GradeClass {
   id: string;
   schoolId: string;
   name: string;
   code: string;
+  sections?: Section[];
+  _count?: {
+    students?: number;
+    sections?: number;
+    feeStructures?: number;
+  };
 }
 
 export interface AcademicYear {
@@ -116,6 +213,15 @@ export interface AcademicYear {
   startDate: string;
   endDate: string;
   isCurrent: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+  _count?: {
+    students?: number;
+    feeStructures?: number;
+    invoices?: number;
+    studentFeeAllocations?: number;
+    payments?: number;
+  };
 }
 
 export interface FeeStructure {
@@ -135,6 +241,8 @@ export interface FeeStructure {
   };
 }
 
+export type StudentStatus = 'ACTIVE' | 'PROMOTED' | 'TRANSFERRED' | 'ALUMNI';
+
 export interface Student {
   id: string;
   schoolId: string;
@@ -142,10 +250,215 @@ export interface Student {
   rollNumber?: string | null;
   firstName: string;
   lastName: string;
+  dateOfBirth?: string | null;
+  guardianName?: string | null;
+  guardianPhone?: string | null;
+  guardianEmail?: string | null;
   gradeId: string;
+  sectionId?: string;
+  academicYearId: string;
+  admissionDate?: string | null;
+  status?: StudentStatus;
+  userId?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
   grade?: GradeClass;
   section?: { id: string; name: string };
   academicYear?: AcademicYear;
+  userAccount?: {
+    id: string;
+    email: string;
+    name: string;
+    status: string;
+    createdAt?: string;
+  } | null;
+  parentRelations?: Array<{
+    id: string;
+    relationshipType: string;
+    isVerified: boolean;
+    parent: {
+      id: string;
+      email: string;
+      name: string;
+      status: string;
+    };
+  }>;
+  _count?: {
+    feeAllocations: number;
+    invoices: number;
+    payments: number;
+  };
+}
+
+export interface QueryStudentsParams {
+  page?: number;
+  limit?: number;
+  search?: string;
+  academicYearId?: string;
+  gradeId?: string;
+  sectionId?: string;
+  status?: StudentStatus;
+}
+
+export interface PaginatedStudentsResponse {
+  data: Student[];
+  meta: {
+    total: number;
+    page: number;
+    limit: number;
+    totalPages: number;
+  };
+}
+
+export interface CreateStudentPayload {
+  admissionNumber: string;
+  firstName: string;
+  lastName: string;
+  gradeId: string;
+  sectionId: string;
+  academicYearId: string;
+  rollNumber?: string;
+  dateOfBirth?: string;
+  guardianName?: string;
+  guardianPhone?: string;
+  guardianEmail?: string;
+  admissionDate?: string;
+  status?: StudentStatus;
+}
+
+export interface UpdateStudentPayload {
+  admissionNumber?: string;
+  firstName?: string;
+  lastName?: string;
+  gradeId?: string;
+  sectionId?: string;
+  academicYearId?: string;
+  rollNumber?: string;
+  dateOfBirth?: string;
+  guardianName?: string;
+  guardianPhone?: string;
+  guardianEmail?: string;
+  admissionDate?: string;
+  status?: StudentStatus;
+}
+
+// Phase 3A: Teacher Management Types
+export type TeacherStatus = 'ACTIVE' | 'INACTIVE' | 'ON_LEAVE';
+
+export interface TeacherAssignment {
+  id: string;
+  teacherId: string;
+  schoolId: string;
+  academicYearId: string;
+  gradeId: string;
+  sectionId: string;
+  subject: string;
+  isClassTeacher: boolean;
+  createdAt: string;
+  updatedAt: string;
+  academicYear?: {
+    id: string;
+    name: string;
+    isCurrent?: boolean;
+  };
+  grade?: {
+    id: string;
+    name: string;
+    code: string;
+  };
+  section?: {
+    id: string;
+    name: string;
+    capacity?: number;
+  };
+}
+
+export interface Teacher {
+  id: string;
+  schoolId: string;
+  userId?: string | null;
+  employeeId: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  phone?: string | null;
+  department?: string | null;
+  designation?: string | null;
+  joiningDate?: string | null;
+  status: TeacherStatus;
+  createdAt: string;
+  updatedAt: string;
+  user?: {
+    id: string;
+    email: string;
+    name?: string;
+    role: string;
+    status: string;
+  } | null;
+  userAccount?: {
+    id: string;
+    email: string;
+    name?: string;
+    role: string;
+    status: string;
+  } | null;
+  assignments?: TeacherAssignment[];
+}
+
+export interface QueryTeachersParams {
+  page?: number;
+  limit?: number;
+  search?: string;
+  department?: string;
+  status?: TeacherStatus;
+  sortBy?: 'createdAt' | 'name' | 'employeeId';
+  sortOrder?: 'asc' | 'desc';
+}
+
+export interface PaginatedTeachersResponse {
+  data: Teacher[];
+  meta: {
+    page: number;
+    limit: number;
+    total: number;
+    totalPages: number;
+  };
+}
+
+export interface CreateTeacherPayload {
+  employeeId: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  phone?: string;
+  department?: string;
+  designation?: string;
+  joiningDate?: string;
+  status?: TeacherStatus;
+}
+
+export interface UpdateTeacherPayload {
+  firstName?: string;
+  lastName?: string;
+  email?: string;
+  phone?: string;
+  department?: string;
+  designation?: string;
+  joiningDate?: string;
+  status?: TeacherStatus;
+}
+
+export interface AssignTeacherPayload {
+  academicYearId: string;
+  gradeId: string;
+  sectionId: string;
+  subject?: string;
+  isClassTeacher?: boolean;
+}
+
+export interface ProvisionTeacherAccountPayload {
+  email?: string;
+  password: string;
 }
 
 export interface StudentFeeAllocation {
@@ -191,17 +504,64 @@ export interface HealthResponse {
 
 // Authentication Helpers
 export const authApi = {
-  login: async (email: string, password: string) => {
-    const res = await api.post('/auth/login', { email, password });
+  login: async (email: string, password: string, schoolId?: string) => {
+    const payload: { email: string; password: string; schoolId?: string } = {
+      email,
+      password,
+      ...(schoolId ? { schoolId } : {}),
+    };
+    const res = await api.post('/auth/login', payload);
     if (res.data.accessToken) {
       localStorage.setItem('auth_token', res.data.accessToken);
+      if (res.data.refreshToken) {
+        localStorage.setItem('auth_refresh_token', res.data.refreshToken);
+      }
       localStorage.setItem('auth_user', JSON.stringify(res.data.user));
     }
     return res.data;
   },
-  logout: () => {
-    localStorage.removeItem('auth_token');
-    localStorage.removeItem('auth_user');
+  refresh: async (refreshToken: string) => {
+    const res = await api.post('/auth/refresh', { refreshToken });
+    if (res.data.accessToken) {
+      localStorage.setItem('auth_token', res.data.accessToken);
+      if (res.data.refreshToken) {
+        localStorage.setItem('auth_refresh_token', res.data.refreshToken);
+      }
+    }
+    return res.data;
+  },
+  logout: async () => {
+    try {
+      const refreshToken = localStorage.getItem('auth_refresh_token');
+      await api.post('/auth/logout', { refreshToken });
+    } catch {
+      // Ignore network/server errors during logout
+    } finally {
+      localStorage.removeItem('auth_token');
+      localStorage.removeItem('auth_refresh_token');
+      localStorage.removeItem('auth_user');
+    }
+  },
+  logoutAll: async () => {
+    try {
+      await api.post('/auth/logout-all');
+    } finally {
+      localStorage.removeItem('auth_token');
+      localStorage.removeItem('auth_refresh_token');
+      localStorage.removeItem('auth_user');
+    }
+  },
+  forgotPassword: async (email: string) => {
+    const res = await api.post('/auth/forgot-password', { email });
+    return res.data;
+  },
+  resetPassword: async (token: string, newPassword: string) => {
+    const res = await api.post('/auth/reset-password', { token, newPassword });
+    return res.data;
+  },
+  changePassword: async (currentPassword: string, newPassword: string) => {
+    const res = await api.post('/auth/change-password', { currentPassword, newPassword });
+    return res.data;
   },
   getUser: () => {
     try {
@@ -212,6 +572,7 @@ export const authApi = {
     }
   },
   getToken: () => localStorage.getItem('auth_token'),
+  getRefreshToken: () => localStorage.getItem('auth_refresh_token'),
   getProfile: async () => {
     const res = await api.get<{
       id: string;
@@ -312,6 +673,21 @@ export const feeStructuresApi = {
   },
 };
 
+export interface BulkAllocationResult {
+  totalRequested: number;
+  allocatedCount: number;
+  skippedCount: number;
+  failedCount: number;
+  results: {
+    studentId: string;
+    studentName: string;
+    admissionNumber: string;
+    status: 'ALLOCATED' | 'SKIPPED' | 'FAILED';
+    allocationId?: string;
+    reason?: string;
+  }[];
+}
+
 // Student Allocations API
 export const studentAllocationsApi = {
   list: async (filters?: { academicYearId?: string; gradeId?: string; studentId?: string }) => {
@@ -332,6 +708,18 @@ export const studentAllocationsApi = {
     optedFeeHeadIds?: string[];
   }) => {
     const res = await api.post<StudentFeeAllocation>('/student-allocations', data);
+    return res.data;
+  },
+  bulkCreate: async (data: {
+    academicYearId: string;
+    feeStructureId: string;
+    studentIds: string[];
+    concessionType?: ConcessionType;
+    concessionValue?: number;
+    concessionReason?: string;
+    optedFeeHeadIds?: string[];
+  }) => {
+    const res = await api.post<BulkAllocationResult>('/student-allocations/bulk', data);
     return res.data;
   },
   update: async (
@@ -372,6 +760,201 @@ export const metaApi = {
     const res = await api.get<AcademicYear[]>('/students/meta/academic-years');
     return res.data;
   },
+};
+
+// Phase 1A: Academics API
+export const academicsApi = {
+  getAcademicYears: async () => {
+    const res = await api.get<AcademicYear[]>('/academics/academic-years');
+    return res.data;
+  },
+  getAcademicYearById: async (id: string) => {
+    const res = await api.get<AcademicYear>(`/academics/academic-years/${id}`);
+    return res.data;
+  },
+  createAcademicYear: async (data: {
+    name: string;
+    startDate: string;
+    endDate: string;
+    isCurrent?: boolean;
+  }) => {
+    const res = await api.post<AcademicYear>('/academics/academic-years', data);
+    return res.data;
+  },
+  updateAcademicYear: async (
+    id: string,
+    data: {
+      name?: string;
+      startDate?: string;
+      endDate?: string;
+      isCurrent?: boolean;
+    },
+  ) => {
+    const res = await api.patch<AcademicYear>(`/academics/academic-years/${id}`, data);
+    return res.data;
+  },
+  setCurrentAcademicYear: async (id: string) => {
+    const res = await api.post<AcademicYear>(`/academics/academic-years/${id}/set-current`);
+    return res.data;
+  },
+  deleteAcademicYear: async (id: string) => {
+    const res = await api.delete(`/academics/academic-years/${id}`);
+    return res.data;
+  },
+  getGrades: async () => {
+    const res = await api.get<GradeClass[]>('/academics/grades');
+    return res.data;
+  },
+  getGradeById: async (id: string) => {
+    const res = await api.get<GradeClass>(`/academics/grades/${id}`);
+    return res.data;
+  },
+  createGrade: async (data: { name: string; code: string }) => {
+    const res = await api.post<GradeClass>('/academics/grades', data);
+    return res.data;
+  },
+  updateGrade: async (id: string, data: { name?: string; code?: string }) => {
+    const res = await api.patch<GradeClass>(`/academics/grades/${id}`, data);
+    return res.data;
+  },
+  deleteGrade: async (id: string) => {
+    const res = await api.delete(`/academics/grades/${id}`);
+    return res.data;
+  },
+  createSection: async (
+    gradeId: string,
+    data: { name: string; capacity?: number },
+  ) => {
+    const res = await api.post<Section>(`/academics/grades/${gradeId}/sections`, data);
+    return res.data;
+  },
+  updateSection: async (
+    id: string,
+    data: { name?: string; capacity?: number },
+  ) => {
+    const res = await api.patch<Section>(`/academics/sections/${id}`, data);
+    return res.data;
+  },
+  deleteSection: async (id: string) => {
+    const res = await api.delete(`/academics/sections/${id}`);
+    return res.data;
+  },
+};
+
+// Phase 1B: Students Management & Admissions API
+export const studentsApi = {
+  getStudents: async (params?: QueryStudentsParams) => {
+    const res = await api.get<PaginatedStudentsResponse>('/students', { params });
+    return res.data;
+  },
+  getStudentById: async (id: string) => {
+    const res = await api.get<Student>(`/students/${id}`);
+    return res.data;
+  },
+  getStudentProfile: async (id: string) => {
+    const res = await api.get<Student>(`/students/${id}/profile`);
+    return res.data;
+  },
+  createStudent: async (payload: CreateStudentPayload) => {
+    const res = await api.post<Student>('/students', payload);
+    return res.data;
+  },
+  updateStudent: async (id: string, payload: UpdateStudentPayload) => {
+    const res = await api.patch<Student>(`/students/${id}`, payload);
+    return res.data;
+  },
+  getFeeStatement: async (studentId: string, academicYearId?: string) => {
+    const res = await api.get<StudentFeeStatement>(`/students/${studentId}/fee-statement`, {
+      params: academicYearId ? { academicYearId } : undefined,
+    });
+    return res.data;
+  },
+};
+
+// Phase 3A: Teachers API Client
+const normalizeTeacherRecord = (t: Teacher): Teacher => {
+  const account = t.user || t.userAccount || null;
+  return {
+    ...t,
+    user: account,
+    userAccount: account,
+  };
+};
+
+export const teachersApi = {
+  getTeachers: async (params?: QueryTeachersParams) => {
+    const res = await api.get<PaginatedTeachersResponse>('/teachers', { params });
+    if (res.data?.data) {
+      res.data.data = res.data.data.map(normalizeTeacherRecord);
+    }
+    return res.data;
+  },
+  getDepartments: async () => {
+    const res = await api.get<string[]>('/teachers/meta/departments');
+    return res.data;
+  },
+  getTeacherById: async (id: string) => {
+    const res = await api.get<Teacher>(`/teachers/${id}`);
+    return res.data ? normalizeTeacherRecord(res.data) : res.data;
+  },
+  createTeacher: async (payload: CreateTeacherPayload) => {
+    const res = await api.post<Teacher>('/teachers', payload);
+    return res.data ? normalizeTeacherRecord(res.data) : res.data;
+  },
+  updateTeacher: async (id: string, payload: UpdateTeacherPayload) => {
+    const res = await api.patch<Teacher>(`/teachers/${id}`, payload);
+    return res.data ? normalizeTeacherRecord(res.data) : res.data;
+  },
+  deactivateTeacher: async (id: string) => {
+    const res = await api.post<Teacher>(`/teachers/${id}/deactivate`);
+    return res.data ? normalizeTeacherRecord(res.data) : res.data;
+  },
+  deleteTeacher: async (id: string) => {
+    const res = await api.delete<{ message: string }>(`/teachers/${id}`);
+    return res.data;
+  },
+  assignTeacher: async (id: string, payload: AssignTeacherPayload) => {
+    const res = await api.post<TeacherAssignment>(`/teachers/${id}/assignments`, payload);
+    return res.data;
+  },
+  removeAssignment: async (teacherId: string, assignmentId: string) => {
+    const res = await api.delete<{ message: string }>(`/teachers/${teacherId}/assignments/${assignmentId}`);
+    return res.data;
+  },
+  provisionAccount: async (id: string, payload: ProvisionTeacherAccountPayload) => {
+    const res = await api.post<{ message: string; user: any }>(`/teachers/${id}/account`, payload);
+    return res.data;
+  },
+};
+
+// Cached authenticated teacher profile for Class Teacher authorization & UX gating
+let cachedTeacherProfile: { userId: string; teacher: Teacher | null; timestamp: number } | null = null;
+
+export const getMyTeacherProfile = async (user: { id: string; email: string }): Promise<Teacher | null> => {
+  if (
+    cachedTeacherProfile &&
+    cachedTeacherProfile.userId === user.id &&
+    Date.now() - cachedTeacherProfile.timestamp < 30000
+  ) {
+    return cachedTeacherProfile.teacher;
+  }
+  try {
+    const res = await teachersApi.getTeachers({ search: user.email, limit: 10 });
+    const match =
+      res.data?.find(
+        (t) =>
+          t.userId === user.id ||
+          (t.email && t.email.toLowerCase() === user.email.toLowerCase()),
+      ) || null;
+    cachedTeacherProfile = { userId: user.id, teacher: match, timestamp: Date.now() };
+    return match;
+  } catch {
+    return null;
+  }
+};
+
+export const clearTeacherProfileCache = () => {
+  cachedTeacherProfile = null;
 };
 
 // Phase 2C: Fee Generation & Statement Types
@@ -1520,8 +2103,48 @@ export const paymentsApi = {
   },
 
   getReceiptByNumber: async (receiptNumber: string): Promise<ReceiptRecord> => {
-    const res = await api.get<ReceiptRecord>(`/payments/receipts/${receiptNumber}`);
+    const res = await api.get<ReceiptRecord>(`/payments/receipts/${encodeURIComponent(receiptNumber)}`);
     return res.data;
+  },
+
+  downloadReceiptPdf: async (
+    receiptNumber: string,
+    options?: { layout?: 'compact' | 'standard'; copies?: number },
+  ): Promise<void> => {
+    const res = await api.get(`/payments/receipts/${encodeURIComponent(receiptNumber)}/pdf`, {
+      params: options,
+      responseType: 'blob',
+    });
+    const blob = new Blob([res.data], { type: 'application/pdf' });
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    const safeFileName = receiptNumber.replace(/[^A-Za-z0-9._-]/g, '_');
+    link.setAttribute('download', `${safeFileName}.pdf`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    window.URL.revokeObjectURL(url);
+  },
+
+  downloadBatchReceiptsPdf: async (
+    receiptNumbers: string[],
+    options?: { layout?: 'compact' | 'standard' },
+  ): Promise<void> => {
+    const res = await api.post(
+      '/payments/receipts/batch-pdf',
+      { receiptNumbers, layout: options?.layout || 'compact' },
+      { responseType: 'blob' },
+    );
+    const blob = new Blob([res.data], { type: 'application/pdf' });
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `selected_receipts_${receiptNumbers.length}.pdf`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    window.URL.revokeObjectURL(url);
   },
 
   reverse: async (
@@ -1568,7 +2191,797 @@ export const fetchSystemHealth = async (): Promise<HealthResponse> => {
   return response.data;
 };
 
+export interface SchoolRecord {
+  id: string;
+  code: string;
+  name: string;
+  address?: string | null;
+  city?: string | null;
+  state?: string | null;
+  postalCode?: string | null;
+  country: string;
+  phone?: string | null;
+  email?: string | null;
+  website?: string | null;
+  currency: string;
+  timezone: string;
+  status: 'ACTIVE' | 'INACTIVE' | 'SUSPENDED';
+  createdAt: string;
+  updatedAt: string;
+  _count?: {
+    users?: number;
+    students?: number;
+    invoices?: number;
+    payments?: number;
+    grades?: number;
+    academicYears?: number;
+    feeStructures?: number;
+  };
+  hasAdmin?: boolean;
+  admin?: {
+    id: string;
+    name: string;
+    email: string;
+    status: string;
+  } | null;
+}
+
+export interface ListSchoolsParams {
+  page?: number;
+  limit?: number;
+  search?: string;
+  status?: 'ACTIVE' | 'INACTIVE' | 'SUSPENDED';
+}
+
+export interface ListSchoolsResponse {
+  data: SchoolRecord[];
+  meta: {
+    total: number;
+    page: number;
+    limit: number;
+    totalPages: number;
+  };
+}
+
+export interface CreateSchoolPayload {
+  code: string;
+  name: string;
+  address?: string;
+  city?: string;
+  state?: string;
+  postalCode?: string;
+  country?: string;
+  phone?: string;
+  email?: string;
+  website?: string;
+  currency?: string;
+  timezone?: string;
+}
+
+export interface UpdateSchoolPayload {
+  code?: string;
+  name?: string;
+  address?: string;
+  city?: string;
+  state?: string;
+  postalCode?: string;
+  country?: string;
+  phone?: string;
+  email?: string;
+  website?: string;
+  currency?: string;
+  timezone?: string;
+}
+
+export interface SchoolAdminRecord {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+  status: 'ACTIVE' | 'INACTIVE';
+  createdAt: string;
+  updatedAt: string;
+  lastLoginAt?: string | null;
+  failedLoginAttempts?: number;
+  lockedUntil?: string | null;
+  passwordChangedAt?: string | null;
+  school?: {
+    id: string;
+    name: string;
+    code: string;
+    status: 'ACTIVE' | 'INACTIVE' | 'SUSPENDED';
+  } | null;
+}
+
+export interface SchoolAdminProfile extends SchoolAdminRecord {
+  auditHistory?: Array<{
+    id: string;
+    eventType: string;
+    details?: any;
+    ipAddress?: string | null;
+    userAgent?: string | null;
+    createdAt: string;
+  }>;
+}
+
+export interface ListSchoolAdminsResponse {
+  data: SchoolAdminRecord[];
+  meta: {
+    total: number;
+    page: number;
+    limit: number;
+    totalPages: number;
+  };
+}
+
+export const schoolsApi = {
+  list: async (params?: ListSchoolsParams): Promise<ListSchoolsResponse> => {
+    const res = await api.get<ListSchoolsResponse>('/schools', { params });
+    return res.data;
+  },
+  get: async (id: string): Promise<SchoolRecord> => {
+    const res = await api.get<SchoolRecord>(`/schools/${id}`);
+    return res.data;
+  },
+  getById: async (id: string): Promise<SchoolRecord> => {
+    const res = await api.get<SchoolRecord>(`/schools/${id}`);
+    return res.data;
+  },
+  create: async (payload: CreateSchoolPayload): Promise<SchoolRecord> => {
+    const res = await api.post<SchoolRecord>('/schools', payload);
+    return res.data;
+  },
+  update: async (id: string, payload: UpdateSchoolPayload): Promise<SchoolRecord> => {
+    const res = await api.patch<SchoolRecord>(`/schools/${id}`, payload);
+    return res.data;
+  },
+  updateStatus: async (
+    id: string,
+    status: 'ACTIVE' | 'INACTIVE' | 'SUSPENDED',
+  ): Promise<SchoolRecord> => {
+    const res = await api.patch<SchoolRecord>(`/schools/${id}/status`, { status });
+    return res.data;
+  },
+  provisionAdmin: async (
+    id: string,
+    payload: { name: string; email: string; password: string },
+  ): Promise<{ message: string; user: UserProfile }> => {
+    const res = await api.post<{ message: string; user: UserProfile }>(
+      `/schools/${id}/admins`,
+      payload,
+    );
+    return res.data;
+  },
+
+  // -------------------------------------------------------------
+  // Platform Super Admin: School Administrator Account Management
+  // -------------------------------------------------------------
+  listAdmins: async (params?: {
+    page?: number;
+    limit?: number;
+    search?: string;
+    schoolId?: string;
+    status?: 'ACTIVE' | 'INACTIVE';
+  }): Promise<ListSchoolAdminsResponse> => {
+    const res = await api.get<ListSchoolAdminsResponse>('/schools/administrators', { params });
+    return res.data;
+  },
+  getAdminProfile: async (adminId: string): Promise<SchoolAdminProfile> => {
+    const res = await api.get<SchoolAdminProfile>(`/schools/administrators/${adminId}`);
+    return res.data;
+  },
+  createAdminForSchool: async (
+    schoolId: string,
+    payload: { name: string; email: string; password: string },
+  ): Promise<{ message: string; user: SchoolAdminRecord }> => {
+    const res = await api.post<{ message: string; user: SchoolAdminRecord }>(
+      `/schools/${schoolId}/administrators`,
+      payload,
+    );
+    return res.data;
+  },
+  suspendAdmin: async (
+    adminId: string,
+    reason: string,
+  ): Promise<{ message: string; user: SchoolAdminRecord }> => {
+    const res = await api.patch<{ message: string; user: SchoolAdminRecord }>(
+      `/schools/administrators/${adminId}/suspend`,
+      { reason },
+    );
+    return res.data;
+  },
+  activateAdmin: async (
+    adminId: string,
+    reason?: string,
+  ): Promise<{ message: string; user: SchoolAdminRecord }> => {
+    const res = await api.patch<{ message: string; user: SchoolAdminRecord }>(
+      `/schools/administrators/${adminId}/activate`,
+      { reason },
+    );
+    return res.data;
+  },
+  initiateAdminPasswordReset: async (
+    adminId: string,
+  ): Promise<{ success: boolean; message: string }> => {
+    const res = await api.post<{ success: boolean; message: string }>(
+      `/schools/administrators/${adminId}/reset-password`,
+      {},
+    );
+    return res.data;
+  },
+};
+
+export interface UserProfile {
+  id: string;
+  schoolId: string | null;
+  name: string;
+  email: string;
+  role: string;
+  status: 'ACTIVE' | 'INACTIVE';
+  createdAt: string;
+  updatedAt?: string;
+  studentProfile?: {
+    id: string;
+    admissionNumber: string;
+    firstName: string;
+    lastName: string;
+  } | null;
+  parentRelations?: Array<{
+    id: string;
+    studentId: string;
+    relationshipType: string;
+    student?: {
+      id: string;
+      admissionNumber: string;
+      firstName: string;
+      lastName: string;
+      grade?: { name: string };
+      section?: { name: string };
+    };
+  }>;
+}
+
+export interface UnlinkedStudentRecord {
+  id: string;
+  admissionNumber: string;
+  firstName: string;
+  lastName: string;
+  guardianName?: string | null;
+  guardianEmail?: string | null;
+  guardianPhone?: string | null;
+  grade?: { id: string; name: string };
+  section?: { id: string; name: string };
+  academicYear?: { id: string; name: string };
+}
+
+export const usersApi = {
+  list: async (params?: { role?: string; status?: string; search?: string }): Promise<UserProfile[]> => {
+    const res = await api.get<UserProfile[]>('/users', { params });
+    return res.data;
+  },
+  getMe: async (): Promise<UserProfile> => {
+    const res = await api.get<UserProfile>('/users/me');
+    return res.data;
+  },
+  createStaff: async (payload: { name: string; email: string; password: string }): Promise<UserProfile> => {
+    const res = await api.post<UserProfile>('/users/staff', payload);
+    return res.data;
+  },
+  update: async (id: string, payload: { name?: string }): Promise<UserProfile> => {
+    const res = await api.patch<UserProfile>(`/users/${id}`, payload);
+    return res.data;
+  },
+  updateStatus: async (id: string, status: 'ACTIVE' | 'INACTIVE'): Promise<UserProfile> => {
+    const res = await api.patch<UserProfile>(`/users/${id}/status`, { status });
+    return res.data;
+  },
+  getUnlinkedStudents: async (): Promise<UnlinkedStudentRecord[]> => {
+    const res = await api.get<UnlinkedStudentRecord[]>('/users/students/unlinked');
+    return res.data;
+  },
+  provisionStudentAccount: async (
+    studentId: string,
+    payload: { email: string; password: string; name?: string },
+  ): Promise<{ message: string; user: UserProfile; studentId: string }> => {
+    const res = await api.post<{ message: string; user: UserProfile; studentId: string }>(
+      `/users/students/${studentId}/account`,
+      payload,
+    );
+    return res.data;
+  },
+  listParents: async (): Promise<UserProfile[]> => {
+    const res = await api.get<UserProfile[]>('/users/parents');
+    return res.data;
+  },
+  createParent: async (payload: {
+    name: string;
+    email: string;
+    password: string;
+    studentIds?: string[];
+    relationshipType?: string;
+  }): Promise<UserProfile> => {
+    const res = await api.post<UserProfile>('/users/parents', payload);
+    return res.data;
+  },
+  linkParentStudent: async (
+    parentId: string,
+    studentId: string,
+    payload?: { relationshipType?: string },
+  ): Promise<any> => {
+    const res = await api.post(`/users/parents/${parentId}/students/${studentId}`, payload || {});
+    return res.data;
+  },
+  unlinkParentStudent: async (parentId: string, studentId: string): Promise<{ message: string }> => {
+    const res = await api.delete<{ message: string }>(`/users/parents/${parentId}/students/${studentId}`);
+    return res.data;
+  },
+};
+
+// ==========================================
+// School Payment Gateway Configuration Types & API (Phase D)
+// ==========================================
+export type GatewayStatus = 'PENDING_VERIFICATION' | 'ACTIVE' | 'DISABLED';
+export type GatewayEnvironment = 'TEST' | 'LIVE';
+export type GatewayProvider = 'RAZORPAY';
+
+export interface PaymentGatewayConfig {
+  id: string;
+  schoolId: string;
+  provider: GatewayProvider;
+  merchantName: string | null;
+  keyId: string;
+  keySecretMasked: string;
+  hasKeySecret: boolean;
+  hasWebhookSecret: boolean;
+  webhookSecretMasked: string | null;
+  environment: GatewayEnvironment;
+  status: GatewayStatus;
+  lastVerifiedAt: string | null;
+  lastVerificationError: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ConfigurePaymentGatewayPayload {
+  keyId: string;
+  keySecret?: string;
+  merchantName?: string;
+  webhookSecret?: string;
+}
+
+export interface VerifyGatewayResult {
+  success: boolean;
+  status: GatewayStatus;
+  message: string;
+  testedAt: string;
+}
+
+export const paymentGatewayApi = {
+  getConfig: async (): Promise<PaymentGatewayConfig | null> => {
+    const res = await api.get<PaymentGatewayConfig | null>('/payment-gateway/config');
+    return res.data;
+  },
+  configure: async (payload: ConfigurePaymentGatewayPayload): Promise<PaymentGatewayConfig> => {
+    const res = await api.put<PaymentGatewayConfig>('/payment-gateway/config', payload);
+    return res.data;
+  },
+  verify: async (): Promise<VerifyGatewayResult> => {
+    const res = await api.post<VerifyGatewayResult>('/payment-gateway/verify');
+    return res.data;
+  },
+  disconnect: async (): Promise<{ success: boolean; message: string }> => {
+    const res = await api.delete<{ success: boolean; message: string }>('/payment-gateway/config');
+    return res.data;
+  },
+};
+
+// ==========================================
+// Online Payment Orders API (Phase E / F)
+// ==========================================
+export interface CreateOnlinePaymentOrderPayload {
+  invoiceId: string;
+  amount?: number;
+  idempotencyKey?: string;
+}
+
+export interface OnlinePaymentOrderResponse {
+  orderId: string;
+  keyId: string;
+  amount: number;
+  amountInPaise: number;
+  currency: string;
+  invoiceId: string;
+  studentId: string;
+  schoolName: string;
+  studentName: string;
+  studentEmail?: string;
+  studentPhone?: string;
+  idempotencyKey: string;
+  status: string;
+  createdAt: string;
+}
+
+export const onlinePaymentsApi = {
+  createOrder: async (
+    payload: CreateOnlinePaymentOrderPayload,
+    idempotencyKey?: string,
+  ): Promise<OnlinePaymentOrderResponse> => {
+    const headers: Record<string, string> = {};
+    const key = idempotencyKey || payload.idempotencyKey;
+    if (key) {
+      headers['idempotency-key'] = key;
+    }
+    const res = await api.post<OnlinePaymentOrderResponse>(
+      '/payments/online/create-order',
+      payload,
+      { headers },
+    );
+    return res.data;
+  },
+};
+
+export type AcademicYearFormat = 'SHORT_6DIGIT' | 'FULL_8DIGIT' | 'START_YEAR_4DIGIT' | 'NONE';
+
+export interface ReceiptNumberConfigResponse {
+  id?: string;
+  schoolId: string;
+  prefix: string;
+  yearFormat: AcademicYearFormat;
+  paddingDigits: number;
+  separator: string;
+  previewSample: string;
+  isCustomized: boolean;
+  updatedAt?: string;
+}
+
+export interface UpdateReceiptNumberConfigPayload {
+  prefix: string;
+  yearFormat: AcademicYearFormat;
+  paddingDigits: number;
+  separator: string;
+}
+
+export interface PreviewReceiptNumberPayload {
+  prefix: string;
+  yearFormat: AcademicYearFormat;
+  paddingDigits: number;
+  separator: string;
+  sampleYearName?: string;
+  sampleSequence?: number;
+}
+
+export const receiptNumberingApi = {
+  getConfig: async (schoolId?: string): Promise<ReceiptNumberConfigResponse> => {
+    const res = await api.get<ReceiptNumberConfigResponse>('/receipt-numbering/config', {
+      params: schoolId ? { schoolId } : undefined,
+    });
+    return res.data;
+  },
+  updateConfig: async (
+    payload: UpdateReceiptNumberConfigPayload,
+    schoolId?: string,
+  ): Promise<ReceiptNumberConfigResponse> => {
+    const res = await api.put<ReceiptNumberConfigResponse>('/receipt-numbering/config', payload, {
+      params: schoolId ? { schoolId } : undefined,
+    });
+    return res.data;
+  },
+  preview: async (payload: PreviewReceiptNumberPayload): Promise<{ preview: string }> => {
+    const res = await api.post<{ preview: string }>('/receipt-numbering/preview', payload);
+    return res.data;
+  },
+};
+
+// =========================================================================
+// Attendance Management Types & API (Phase 3B MVP)
+// =========================================================================
+
+export type AttendanceStatus = 'PRESENT' | 'ABSENT' | 'LATE' | 'HALF_DAY' | 'EXCUSED';
+export type VirtualAttendanceStatus = AttendanceStatus | 'NOT_MARKED';
+export type RegisterStatus = 'UNMARKED' | 'PARTIALLY_MARKED' | 'SUBMITTED' | 'LOCKED';
+export type AttendanceType = 'DAILY' | 'PERIOD';
+
+export interface AttendanceRosterItem {
+  studentId: string;
+  admissionNumber: string;
+  rollNumber: string | null;
+  firstName: string;
+  lastName: string;
+  gradeId: string;
+  sectionId: string;
+  status: VirtualAttendanceStatus;
+  remarks: string | null;
+  attendanceRecordId: string | null;
+  markedAt: string | Date | null;
+}
+
+export interface RegisterSummary {
+  totalEnrolled: number;
+  totalPresent: number;
+  totalAbsent: number;
+  totalLate: number;
+  totalHalfDay: number;
+  totalExcused: number;
+  totalUnmarked: number;
+  status: RegisterStatus;
+  isLocked: boolean;
+}
+
+export interface AttendanceRegisterResponse {
+  data: AttendanceRosterItem[];
+  register: RegisterSummary;
+  meta: {
+    total: number;
+    page: number;
+    limit: number;
+    totalPages: number;
+  };
+}
+
+export interface BulkMarkAttendanceEntry {
+  studentId: string;
+  status: AttendanceStatus;
+  remarks?: string;
+}
+
+export interface BulkMarkAttendancePayload {
+  academicYearId: string;
+  gradeId: string;
+  sectionId: string;
+  attendanceDate: string; // YYYY-MM-DD
+  entries: BulkMarkAttendanceEntry[];
+}
+
+export interface BulkMarkResult {
+  registerId: string;
+  attendanceDate: string;
+  sectionId: string;
+  totalSubmitted: number;
+  createdCount: number;
+  updatedCount: number;
+  summary: RegisterSummary;
+}
+
+export interface CorrectAttendancePayload {
+  status: AttendanceStatus;
+  reason: string;
+}
+
+export interface AttendanceCorrectionEntry {
+  id: string;
+  schoolId: string;
+  attendanceId: string;
+  studentId: string;
+  attendanceDate: string;
+  previousStatus: AttendanceStatus;
+  newStatus: AttendanceStatus;
+  reason: string;
+  changedById: string;
+  changedAt: string | Date;
+}
+
+export interface StudentAttendanceRecord {
+  id: string;
+  schoolId: string;
+  registerId: string | null;
+  studentId: string;
+  academicYearId: string;
+  gradeId: string;
+  sectionId: string;
+  attendanceDate: string;
+  attendanceType: AttendanceType;
+  periodNumber: number;
+  status: AttendanceStatus;
+  remarks: string | null;
+  markedById: string | null;
+  markedAt: string | Date;
+  lastUpdatedBy: string | null;
+  updatedAt: string | Date;
+}
+
+export interface AttendanceCorrectionResult {
+  updatedRecord: StudentAttendanceRecord;
+  correctionLog: AttendanceCorrectionEntry;
+}
+
+export interface StudentAttendanceStats {
+  totalWorkingDays: number;
+  presentDays: number;
+  absentDays: number;
+  lateDays: number;
+  halfDays: number;
+  excusedDays: number;
+  attendanceRate: number;
+}
+
+export interface StudentAttendanceHistoryResponse {
+  student: {
+    id: string;
+    admissionNumber: string;
+    rollNumber: string | null;
+    firstName: string;
+    lastName: string;
+    gradeId: string;
+    sectionId: string;
+  };
+  stats: StudentAttendanceStats;
+  data: StudentAttendanceRecord[];
+  meta: {
+    total: number;
+    page: number;
+    limit: number;
+    totalPages: number;
+  };
+}
+
+export interface QueryRegisterParams {
+  date: string;
+  academicYearId: string;
+  gradeId: string;
+  sectionId: string;
+  search?: string;
+  page?: number;
+  limit?: number;
+}
+
+export interface QueryStudentHistoryParams {
+  startDate?: string;
+  endDate?: string;
+  academicYearId?: string;
+  page?: number;
+  limit?: number;
+}
+
+export const attendanceApi = {
+  getRegister: async (params: QueryRegisterParams): Promise<AttendanceRegisterResponse> => {
+    const res = await api.get<AttendanceRegisterResponse>('/attendance/register', { params });
+    return res.data;
+  },
+
+  bulkMark: async (payload: BulkMarkAttendancePayload): Promise<BulkMarkResult> => {
+    const res = await api.post<BulkMarkResult>('/attendance/register/bulk-mark', payload);
+    return res.data;
+  },
+
+  correctAttendance: async (
+    id: string,
+    payload: CorrectAttendancePayload,
+  ): Promise<AttendanceCorrectionResult> => {
+    const res = await api.patch<AttendanceCorrectionResult>(`/attendance/${id}`, payload);
+    return res.data;
+  },
+
+  getStudentHistory: async (
+    studentId: string,
+    params?: QueryStudentHistoryParams,
+  ): Promise<StudentAttendanceHistoryResponse> => {
+    const res = await api.get<StudentAttendanceHistoryResponse>(`/attendance/students/${studentId}`, {
+      params,
+    });
+    return res.data;
+  },
+};
+
+// =========================================================================
+// Notification Administration API Types & Client
+// =========================================================================
+
+export type NotificationChannel = 'EMAIL';
+
+export type NotificationEventType =
+  | 'RECEIPT_ISSUED'
+  | 'PAYMENT_REVERSED'
+  | 'REFUND_SUCCEEDED'
+  | 'REFUND_FAILED'
+  | 'FEE_DUE_REMINDER'
+  | 'STUDENT_ADMITTED'
+  | 'ATTENDANCE_ABSENT'
+  | 'EXAM_SCHEDULE_PUBLISHED'
+  | 'EXAM_RESULTS_RELEASED';
+
+export type NotificationStatus =
+  | 'PENDING'
+  | 'PROCESSING'
+  | 'SENT'
+  | 'FAILED'
+  | 'SKIPPED'
+  | 'CANCELLED';
+
+export interface SchoolNotificationSettings {
+  id?: string;
+  schoolId: string;
+  receiptEmailEnabled: boolean;
+  paymentReversalEmailEnabled: boolean;
+  refundSuccessEmailEnabled: boolean;
+  refundFailureEmailEnabled: boolean;
+  feeReminderEmailEnabled: boolean;
+  studentAdmissionEmailEnabled: boolean;
+  attendanceAbsenceEmailEnabled: boolean;
+  examScheduleEmailEnabled: boolean;
+  examResultsEmailEnabled: boolean;
+  senderDisplayName?: string | null;
+  replyToEmail?: string | null;
+  updatedAt: string;
+}
+
+export interface UpdateSchoolNotificationSettingsPayload {
+  receiptEmailEnabled?: boolean;
+  paymentReversalEmailEnabled?: boolean;
+  refundSuccessEmailEnabled?: boolean;
+  refundFailureEmailEnabled?: boolean;
+  feeReminderEmailEnabled?: boolean;
+  studentAdmissionEmailEnabled?: boolean;
+  attendanceAbsenceEmailEnabled?: boolean;
+  examScheduleEmailEnabled?: boolean;
+  examResultsEmailEnabled?: boolean;
+  senderDisplayName?: string | null;
+  replyToEmail?: string | null;
+}
+
+export interface NotificationLogItem {
+  id: string;
+  channel: NotificationChannel;
+  eventType: NotificationEventType;
+  recipientEmail?: string | null;
+  recipientName?: string | null;
+  status: NotificationStatus;
+  templateKey: string;
+  attemptCount: number;
+  sentAt?: string | null;
+  createdAt: string;
+  lastErrorCode?: string | null;
+  lastErrorMessage?: string | null;
+}
+
+export interface QueryNotificationLogsParams {
+  page?: number;
+  limit?: number;
+  status?: NotificationStatus;
+  eventType?: NotificationEventType;
+  channel?: NotificationChannel;
+  startDate?: string;
+  endDate?: string;
+  search?: string;
+}
+
+export interface PaginatedNotificationLogsResponse {
+  data: NotificationLogItem[];
+  meta: {
+    total: number;
+    page: number;
+    limit: number;
+    totalPages: number;
+  };
+}
+
+export const notificationsApi = {
+  getSettings: async (): Promise<SchoolNotificationSettings> => {
+    const res = await api.get<SchoolNotificationSettings>('/notifications/settings');
+    return res.data;
+  },
+
+  updateSettings: async (
+    payload: UpdateSchoolNotificationSettingsPayload,
+  ): Promise<SchoolNotificationSettings> => {
+    const res = await api.patch<SchoolNotificationSettings>('/notifications/settings', payload);
+    return res.data;
+  },
+
+  getLogs: async (
+    params?: QueryNotificationLogsParams,
+  ): Promise<PaginatedNotificationLogsResponse> => {
+    const res = await api.get<PaginatedNotificationLogsResponse>('/notifications/logs', { params });
+    return res.data;
+  },
+
+  getLogById: async (id: string): Promise<NotificationLogItem> => {
+    const res = await api.get<NotificationLogItem>(`/notifications/logs/${id}`);
+    return res.data;
+  },
+};
+
 export default api;
+
 
 
 

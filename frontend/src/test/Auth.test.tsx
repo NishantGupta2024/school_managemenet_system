@@ -53,6 +53,32 @@ vi.mock('../services/api', () => {
     feeHeadsApi: { list: vi.fn().mockResolvedValue([]), create: vi.fn(), update: vi.fn(), delete: vi.fn() },
     feeStructuresApi: { list: vi.fn().mockResolvedValue([]), create: vi.fn(), update: vi.fn(), delete: vi.fn() },
     studentAllocationsApi: { list: vi.fn().mockResolvedValue([]), create: vi.fn(), update: vi.fn(), delete: vi.fn() },
+    academicsApi: {
+      getAcademicYears: vi.fn().mockResolvedValue([
+        {
+          id: 'ay-1',
+          name: '2026-2027',
+          startDate: '2026-04-01T00:00:00.000Z',
+          endDate: '2027-03-31T00:00:00.000Z',
+          isCurrent: true,
+          status: 'ACTIVE',
+        },
+      ]),
+      getGrades: vi.fn().mockResolvedValue([
+        { id: 'gr-1', name: 'Grade 10', code: 'G10', displayOrder: 1, sections: [] },
+      ]),
+    },
+    studentsApi: {
+      getStudents: vi.fn().mockResolvedValue({
+        data: [],
+        meta: { total: 0, page: 1, limit: 10, totalPages: 0 },
+      }),
+      getStudentById: vi.fn(),
+      getStudentProfile: vi.fn(),
+      createStudent: vi.fn(),
+      updateStudent: vi.fn(),
+      getFeeStatement: vi.fn(),
+    },
     metaApi: {
       getStudents: vi.fn().mockResolvedValue([]),
       getAccessibleStudents: vi.fn().mockResolvedValue([]),
@@ -153,6 +179,16 @@ vi.mock('../services/api', () => {
       }),
       exportReport: vi.fn().mockResolvedValue('daily_collection_2026-10-17.csv'),
     },
+    schoolsApi: {
+      list: vi.fn().mockResolvedValue({
+        data: [],
+        meta: { total: 0, page: 1, limit: 10, totalPages: 0 },
+      }),
+      getById: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
+      updateStatus: vi.fn(),
+    },
   };
 });
 
@@ -166,9 +202,9 @@ describe('Frontend Authentication & Route Protection', () => {
     (authApi as any).setMockSession(null, null);
   });
 
-  it('redirects unauthenticated users to /login when attempting to access /', async () => {
+  it('redirects unauthenticated users to /login when attempting to access protected route /app', async () => {
     render(
-      <MemoryRouter initialEntries={['/']}>
+      <MemoryRouter initialEntries={['/app']}>
         <AuthProvider>
           <AppRoutes />
         </AuthProvider>
@@ -179,6 +215,21 @@ describe('Frontend Authentication & Route Protection', () => {
       expect(screen.getByText(/Multi-Tenant SaaS • Sign in with your institutional credentials/i)).toBeInTheDocument();
       expect(screen.getByPlaceholderText(/admin@greenwood\.edu/i)).toBeInTheDocument();
       expect(screen.getByPlaceholderText('••••••••')).toBeInTheDocument();
+    });
+  });
+
+  it('renders public institutional website when unauthenticated visitor navigates to /', async () => {
+    render(
+      <MemoryRouter initialEntries={['/']}>
+        <AuthProvider>
+          <AppRoutes />
+        </AuthProvider>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText(/One Unified System for/i)).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /Portal Login/i })).toBeInTheDocument();
     });
   });
 
@@ -327,8 +378,8 @@ describe('Frontend Authentication & Route Protection', () => {
 
     await waitFor(() => {
       expect(screen.getByText('Margaret Vance')).toBeInTheDocument();
-      expect(screen.getByText('Springfield High')).toBeInTheDocument();
-      expect(screen.getByText(/School Admin/i)).toBeInTheDocument();
+      expect(screen.getAllByText('Springfield High').length).toBeGreaterThanOrEqual(1);
+      expect(screen.getAllByText(/School Admin/i).length).toBeGreaterThanOrEqual(1);
       expect(setActiveSchoolId).toHaveBeenCalledWith('sch-uuid-1111');
     });
   });
@@ -352,7 +403,7 @@ describe('Frontend Authentication & Route Protection', () => {
     });
 
     render(
-      <MemoryRouter initialEntries={['/']}>
+      <MemoryRouter initialEntries={['/app']}>
         <AuthProvider>
           <AppRoutes />
         </AuthProvider>
@@ -377,7 +428,7 @@ describe('Frontend Authentication & Route Protection', () => {
     });
 
     render(
-      <MemoryRouter initialEntries={['/']}>
+      <MemoryRouter initialEntries={['/app']}>
         <AuthProvider>
           <AppRoutes />
         </AuthProvider>
@@ -436,7 +487,7 @@ describe('Frontend Authentication & Route Protection', () => {
     });
 
     render(
-      <MemoryRouter initialEntries={['/']}>
+      <MemoryRouter initialEntries={['/app']}>
         <AuthProvider>
           <AppRoutes />
         </AuthProvider>
@@ -473,7 +524,7 @@ describe('Frontend Authentication & Route Protection', () => {
       });
 
       render(
-        <MemoryRouter initialEntries={['/']}>
+        <MemoryRouter initialEntries={['/app/fees']}>
           <AuthProvider>
             <AppRoutes />
           </AuthProvider>
@@ -515,7 +566,7 @@ describe('Frontend Authentication & Route Protection', () => {
       });
 
       render(
-        <MemoryRouter initialEntries={['/']}>
+        <MemoryRouter initialEntries={['/app/fees']}>
           <AuthProvider>
             <AppRoutes />
           </AuthProvider>
@@ -526,8 +577,8 @@ describe('Frontend Authentication & Route Protection', () => {
         expect(screen.getByText('Staff Clerk')).toBeInTheDocument();
       });
 
-      expect(screen.getByRole('button', { name: /^Fee Heads$/i })).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: /^Fee Structures$/i })).toBeInTheDocument();
+      expect(screen.getAllByRole('button', { name: /^Fee Heads$/i }).length).toBeGreaterThanOrEqual(1);
+      expect(screen.getAllByRole('button', { name: /^Fee Structures$/i }).length).toBeGreaterThanOrEqual(1);
       expect(screen.getByRole('button', { name: /^Student Allocations$/i })).toBeInTheDocument();
       expect(screen.getByRole('button', { name: /Monthly Invoicing/i })).toBeInTheDocument();
       expect(screen.getByRole('button', { name: /Excel Imports/i })).toBeInTheDocument();
@@ -538,7 +589,7 @@ describe('Frontend Authentication & Route Protection', () => {
       expect(screen.queryByRole('button', { name: /Fine Rules/i })).not.toBeInTheDocument();
     });
 
-    it('allows PLATFORM_SUPER_ADMIN to manually specify target school context', async () => {
+    it('intercepts PLATFORM_SUPER_ADMIN with TenantContextGate when accessing fees without active context', async () => {
       (authApi as any).setMockSession('super-admin-token', {
         id: 'sa-1',
         name: 'Root Platform Admin',
@@ -554,7 +605,7 @@ describe('Frontend Authentication & Route Protection', () => {
       });
 
       render(
-        <MemoryRouter initialEntries={['/']}>
+        <MemoryRouter initialEntries={['/app/fees']}>
           <AuthProvider>
             <AppRoutes />
           </AuthProvider>
@@ -563,19 +614,76 @@ describe('Frontend Authentication & Route Protection', () => {
 
       await waitFor(() => {
         expect(screen.getByText('Root Platform Admin')).toBeInTheDocument();
-        expect(screen.getByText(/Platform Super Admin/i)).toBeInTheDocument();
+        expect(screen.getByText('Super Admin')).toBeInTheDocument();
       });
 
-      // Context input should exist
-      const schoolInput = screen.getByLabelText(/Target School UUID/i);
-      expect(schoolInput).toBeInTheDocument();
+      // Context Gate should intercept
+      expect(screen.getByRole('region', { name: /Target School Context Required/i })).toBeInTheDocument();
+      expect(screen.getByText(/Select School Context for Fee Management/i)).toBeInTheDocument();
 
-      fireEvent.change(schoolInput, { target: { value: 'sch-custom-uuid-9999' } });
-      const setContextBtn = screen.getByRole('button', { name: /Set Context/i });
-      fireEvent.click(setContextBtn);
+      // Legacy amber banner with raw UUID input should no longer exist
+      expect(screen.queryByPlaceholderText(/Target School UUID/i)).not.toBeInTheDocument();
+    });
 
-      expect(setActiveSchoolId).toHaveBeenCalledWith('sch-custom-uuid-9999');
-      expect(screen.getByRole('button', { name: /Clear \(sch-cust\.\.\.\)/i })).toBeInTheDocument();
+    it('renders school disambiguation selector when email exists across multiple schools and submits selected schoolId (SEC-03)', async () => {
+      (authApi.login as any)
+        .mockRejectedValueOnce({
+          response: {
+            status: 400,
+            data: {
+              code: 'TENANT_SELECTION_REQUIRED',
+              message: 'Multiple school accounts share this email address. Please select your school (schoolId) to sign in.',
+              requiresSchoolSelection: true,
+              schools: [
+                { id: 'school-a', name: 'Alpha Academy', status: 'ACTIVE' },
+                { id: 'school-b', name: 'Beta International', status: 'ACTIVE' },
+              ],
+            },
+          },
+        })
+        .mockResolvedValueOnce({
+          accessToken: 'jwt-school-b',
+          refreshToken: 'refresh-school-b',
+          user: {
+            id: 'user-b',
+            email: 'shared@edu.org',
+            name: 'Shared Admin',
+            role: UserRole.SCHOOL_ADMIN,
+            schoolId: 'school-b',
+            schoolName: 'Beta International',
+          },
+        });
+
+      render(
+        <MemoryRouter initialEntries={['/login']}>
+          <AuthProvider>
+            <LoginView />
+          </AuthProvider>
+        </MemoryRouter>,
+      );
+
+      fireEvent.change(screen.getByPlaceholderText(/admin@greenwood\.edu/i), {
+        target: { value: 'shared@edu.org' },
+      });
+      fireEvent.change(screen.getByPlaceholderText('••••••••'), {
+        target: { value: 'Password123!' },
+      });
+
+      fireEvent.click(screen.getByRole('button', { name: /Sign In to Dashboard/i }));
+
+      await waitFor(() => {
+        expect(screen.getByLabelText(/Select School Institution/i)).toBeInTheDocument();
+      });
+
+      fireEvent.change(screen.getByLabelText(/Select School Institution/i), {
+        target: { value: 'school-b' },
+      });
+
+      fireEvent.click(screen.getByRole('button', { name: /Sign In to Dashboard/i }));
+
+      await waitFor(() => {
+        expect(authApi.login).toHaveBeenLastCalledWith('shared@edu.org', 'Password123!', 'school-b');
+      });
     });
   });
 });

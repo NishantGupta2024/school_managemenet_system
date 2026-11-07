@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   feeStatementApi,
   metaApi,
@@ -7,6 +7,7 @@ import {
   StudentFeeStatement,
   FeeInvoice,
 } from '../services/api';
+import { OnlineCheckoutModal } from './OnlineCheckoutModal';
 import {
   Search,
   User,
@@ -20,6 +21,7 @@ import {
   Eye,
   Percent,
   X,
+  CreditCard,
 } from 'lucide-react';
 
 export const StudentStatementView: React.FC = () => {
@@ -35,6 +37,9 @@ export const StudentStatementView: React.FC = () => {
 
   // Modal for Itemized Line Items
   const [activeInvoice, setActiveInvoice] = useState<FeeInvoice | null>(null);
+
+  // Modal for Razorpay Online Checkout (Phase F)
+  const [checkoutInvoice, setCheckoutInvoice] = useState<FeeInvoice | null>(null);
 
   const filteredStudents = React.useMemo(() => {
     return students.filter(
@@ -53,6 +58,7 @@ export const StudentStatementView: React.FC = () => {
       setSelectedStudentId('');
       setStatement(null);
       setActiveInvoice(null);
+      setCheckoutInvoice(null);
     }
   }, [filteredStudents, selectedStudentId]);
 
@@ -87,42 +93,45 @@ export const StudentStatementView: React.FC = () => {
     };
   }, []);
 
+  const loadStatement = useCallback(
+    async (studentId: string, yearId?: string) => {
+      if (!studentId) {
+        setStatement(null);
+        setLoading(false);
+        return;
+      }
+      try {
+        setLoading(true);
+        setError(null);
+        const data = await feeStatementApi.getStatement(
+          studentId,
+          yearId || undefined,
+        );
+        setStatement(data);
+      } catch (err: any) {
+        setError(
+          err?.response?.data?.message || 'Failed to fetch student fee statement',
+        );
+        setStatement(null);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [],
+  );
+
   // Fetch statement when student or year changes with unmount cleanup and immediate stale state reset (Finding 1 & F-08)
   useEffect(() => {
     setStatement(null);
     setActiveInvoice(null);
+    setCheckoutInvoice(null);
     if (!selectedStudentId) {
       setLoading(false);
       return;
     }
 
-    let isMounted = true;
-    const targetStudentId = selectedStudentId;
-    const targetYearId = selectedYearId;
-    const fetchStatement = async () => {
-      try {
-        setLoading(true);
-        setError(null);
-        const data = await feeStatementApi.getStatement(
-          targetStudentId,
-          targetYearId || undefined,
-        );
-        if (!isMounted) return;
-        setStatement(data);
-      } catch (err: any) {
-        if (!isMounted) return;
-        setError(err?.response?.data?.message || 'Failed to fetch student fee statement');
-        setStatement(null);
-      } finally {
-        if (isMounted) setLoading(false);
-      }
-    };
-
-    fetchStatement();
-    return () => {
-      isMounted = false;
-    };
-  }, [selectedStudentId, selectedYearId]);
+    loadStatement(selectedStudentId, selectedYearId);
+  }, [selectedStudentId, selectedYearId, loadStatement]);
 
   const handleStudentSelect = (studentId: string) => {
     if (studentId !== selectedStudentId) {
@@ -564,13 +573,24 @@ export const StudentStatementView: React.FC = () => {
                           {getStatusBadge(inv.status)}
                         </td>
                         <td className="py-3 px-4 text-right">
-                          <button
-                            onClick={() => setActiveInvoice(inv)}
-                            className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 transition-colors"
-                          >
-                            <Eye className="w-3.5 h-3.5" />
-                            Line Items ({inv.items.length})
-                          </button>
+                          <div className="flex items-center justify-end gap-2">
+                            {inv.status !== 'PAID' && inv.status !== 'VOID' && (
+                              <button
+                                onClick={() => setCheckoutInvoice(inv)}
+                                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 transition-colors shadow-xs"
+                              >
+                                <CreditCard className="w-3.5 h-3.5" />
+                                Pay Online
+                              </button>
+                            )}
+                            <button
+                              onClick={() => setActiveInvoice(inv)}
+                              className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 transition-colors"
+                            >
+                              <Eye className="w-3.5 h-3.5" />
+                              Line Items ({inv.items.length})
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -722,17 +742,48 @@ export const StudentStatementView: React.FC = () => {
               </table>
             </div>
 
-            <div className="mt-6 flex justify-end">
+            <div className="mt-6 flex items-center justify-end gap-3">
               <button
                 onClick={() => setActiveInvoice(null)}
                 className="px-4 py-2 rounded-xl text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-800 transition-colors"
               >
                 Close
               </button>
+              {activeInvoice.status !== 'PAID' && activeInvoice.status !== 'VOID' && (
+                <button
+                  onClick={() => {
+                    const target = activeInvoice;
+                    setActiveInvoice(null);
+                    setCheckoutInvoice(target);
+                  }}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white transition-colors flex items-center gap-1.5 shadow-xs"
+                >
+                  <CreditCard className="w-3.5 h-3.5" />
+                  Pay Online
+                </button>
+              )}
             </div>
           </div>
         </div>
       )}
+
+      {/* Online Checkout Modal (Phase F) */}
+      <OnlineCheckoutModal
+        isOpen={!!checkoutInvoice}
+        invoice={checkoutInvoice}
+        studentName={
+          statement
+            ? `${statement.student.firstName} ${statement.student.lastName}`
+            : ''
+        }
+        studentAdmissionNumber={statement?.student.admissionNumber || ''}
+        onClose={() => setCheckoutInvoice(null)}
+        onRefreshStatement={() => {
+          if (selectedStudentId) {
+            loadStatement(selectedStudentId, selectedYearId);
+          }
+        }}
+      />
     </div>
   );
 };

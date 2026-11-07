@@ -11,12 +11,35 @@ import { WhatsAppProvider } from './whatsapp/whatsapp-provider.interface';
 import { MemoryWhatsAppProvider } from './whatsapp/memory-whatsapp.provider';
 import { WhatsAppCloudApiProvider } from './whatsapp/whatsapp-cloud-api.provider';
 import { FeeReminderService } from './reminders/fee-reminder.service';
+import { FeeReminderScheduler } from './reminders/fee-reminder.scheduler';
+import { NotificationsAdminService } from './notifications-admin.service';
+import { NotificationsController } from './notifications.controller';
+import { MailtrapRateLimiter } from './email/mailtrap-rate-limiter';
+import { RedisRateLimiterClient } from './email/redis-rate-limiter.client';
 import { PrismaModule } from '../prisma/prisma.module';
 
 @Module({
   imports: [PrismaModule],
+  controllers: [NotificationsController],
   providers: [
     EmailConfigService,
+    {
+      provide: RedisRateLimiterClient,
+      useFactory: () => new RedisRateLimiterClient(process.env.REDIS_URL),
+    },
+    {
+      provide: MailtrapRateLimiter,
+      useFactory: (redisClient: RedisRateLimiterClient) => {
+        if (redisClient.isConfigured()) {
+          return new MailtrapRateLimiter({
+            mode: 'distributed',
+            redisClient,
+          });
+        }
+        return new MailtrapRateLimiter({ mode: 'in-memory' });
+      },
+      inject: [RedisRateLimiterClient],
+    },
     MemoryEmailProvider,
     SmtpEmailProvider,
     {
@@ -46,9 +69,13 @@ import { PrismaModule } from '../prisma/prisma.module';
       inject: [WhatsAppConfigService, MemoryWhatsAppProvider, WhatsAppCloudApiProvider],
     },
     FeeReminderService,
+    FeeReminderScheduler,
+    NotificationsAdminService,
   ],
   exports: [
     EmailConfigService,
+    RedisRateLimiterClient,
+    MailtrapRateLimiter,
     EmailProvider,
     MemoryEmailProvider,
     SmtpEmailProvider,
@@ -60,6 +87,7 @@ import { PrismaModule } from '../prisma/prisma.module';
     MemoryWhatsAppProvider,
     WhatsAppCloudApiProvider,
     FeeReminderService,
+    NotificationsAdminService,
   ],
 })
 export class NotificationsModule {}

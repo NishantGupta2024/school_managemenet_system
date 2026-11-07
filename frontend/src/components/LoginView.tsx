@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { School, Lock, Mail, Eye, EyeOff, AlertCircle, ArrowRight, Loader2 } from 'lucide-react';
+import { CymbixLogo } from './CymbixLogo';
+import { Lock, Mail, Eye, EyeOff, AlertCircle, ArrowRight, Loader2 } from 'lucide-react';
 
 export const LoginView: React.FC = () => {
   const { login, isAuthenticated, isLoading } = useAuth();
@@ -10,9 +11,11 @@ export const LoginView: React.FC = () => {
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [selectedSchoolId, setSelectedSchoolId] = useState('');
+  const [tenantChoices, setTenantChoices] = useState<Array<{ id: string; name: string; status?: string }>>([]);
   const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [validationErrors, setValidationErrors] = useState<{ email?: string; password?: string }>({});
+  const [validationErrors, setValidationErrors] = useState<{ email?: string; password?: string; schoolId?: string }>({});
   const [serverError, setServerError] = useState<string | null>(null);
 
   // Safe redirect path calculation
@@ -26,7 +29,7 @@ export const LoginView: React.FC = () => {
     ) {
       return rawFrom;
     }
-    return '/';
+    return '/app';
   }, [location.state]);
 
   // If already authenticated, redirect immediately
@@ -64,15 +67,28 @@ export const LoginView: React.FC = () => {
       return;
     }
 
+    if (tenantChoices.length > 0 && !selectedSchoolId) {
+      setValidationErrors((prev) => ({ ...prev, schoolId: 'Please select your school institution.' }));
+      return;
+    }
+
     setIsSubmitting(true);
     try {
-      await login(email.trim(), password);
+      await login(email.trim(), password, selectedSchoolId || undefined);
       navigate(safeFrom, { replace: true });
     } catch (err: any) {
       const status = err.response?.status;
-      const responseMsg = err.response?.data?.message;
+      const responseData = err.response?.data;
+      const responseMsg = responseData?.message;
 
-      if (status === 401) {
+      if (status === 400 && responseData?.requiresSchoolSelection && Array.isArray(responseData?.schools)) {
+        setTenantChoices(responseData.schools);
+        setServerError(
+          typeof responseMsg === 'string'
+            ? responseMsg
+            : 'Multiple school accounts share this email address. Please select your school below.',
+        );
+      } else if (status === 401) {
         if (typeof responseMsg === 'string' && responseMsg.toLowerCase().includes('inactive')) {
           setServerError('This user account or school tenant is inactive or disabled.');
         } else {
@@ -99,11 +115,9 @@ export const LoginView: React.FC = () => {
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col justify-center py-12 sm:px-6 lg:px-8 font-sans">
       <div className="sm:mx-auto sm:w-full sm:max-w-md">
-        {/* Brand Icon & Heading */}
+        {/* Brand Logo & Heading */}
         <div className="flex justify-center">
-          <div className="bg-brand-600 p-3 rounded-2xl text-white shadow-lg shadow-brand-500/30">
-            <School className="w-8 h-8" />
-          </div>
+          <CymbixLogo />
         </div>
         <h2 className="mt-4 text-center text-2xl font-extrabold text-slate-900 tracking-tight">
           School Fee Management System
@@ -212,6 +226,41 @@ export const LoginView: React.FC = () => {
               )}
             </div>
 
+            {/* Tenant Disambiguation Selector (rendered when an email exists across multiple schools) */}
+            {tenantChoices.length > 0 && (
+              <div>
+                <label htmlFor="schoolId" className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
+                  Select School Institution
+                </label>
+                <select
+                  id="schoolId"
+                  name="schoolId"
+                  value={selectedSchoolId}
+                  onChange={(e) => {
+                    setSelectedSchoolId(e.target.value);
+                    if (validationErrors.schoolId) {
+                      setValidationErrors((prev) => ({ ...prev, schoolId: undefined }));
+                    }
+                  }}
+                  disabled={isSubmitting}
+                  className="block w-full px-3.5 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-600 focus:border-indigo-600"
+                >
+                  <option value="">-- Choose your school --</option>
+                  {tenantChoices.map((school) => (
+                    <option key={school.id} value={school.id}>
+                      {school.name}
+                    </option>
+                  ))}
+                </select>
+                {validationErrors.schoolId && (
+                  <p className="mt-1.5 text-xs text-rose-600 font-medium flex items-center gap-1">
+                    <AlertCircle className="w-3.5 h-3.5" />
+                    {validationErrors.schoolId}
+                  </p>
+                )}
+              </div>
+            )}
+
             {/* Submit Button */}
             <div className="pt-2">
               <button
@@ -235,7 +284,17 @@ export const LoginView: React.FC = () => {
           </form>
         </div>
 
-        <div className="mt-8 text-center text-xs text-slate-400">
+        <div className="mt-6 text-center">
+          <button
+            type="button"
+            onClick={() => navigate('/')}
+            className="text-xs font-semibold text-slate-500 hover:text-indigo-600 transition-colors inline-flex items-center gap-1.5 cursor-pointer"
+          >
+            <span>← Back to Institutional Website</span>
+          </button>
+        </div>
+
+        <div className="mt-4 text-center text-xs text-slate-400">
           Enterprise Multi-Tenant Fee Platform • Protected by Role-Based JWT Context
         </div>
       </div>

@@ -3,12 +3,14 @@ import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import { PrismaService } from '../../prisma/prisma.service';
 import { UserRole } from '@prisma/client';
+import { resolveJwtSecret } from '../jwt-secret.util';
 
 export interface JwtPayload {
   sub: string;
   email: string;
   role: UserRole;
   schoolId: string | null;
+  sessionId?: string;
   iat?: number;
   exp?: number;
 }
@@ -19,7 +21,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
-      secretOrKey: process.env.JWT_SECRET || 'super-secret-key-for-development-phase1-school-fee-mgmt',
+      secretOrKey: resolveJwtSecret(),
     });
   }
 
@@ -40,12 +42,23 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       throw new UnauthorizedException('User account is inactive or suspended');
     }
 
+    // Verify session validity when sessionId is present in payload
+    if (payload.sessionId) {
+      const session = await this.prisma.userSession.findUnique({
+        where: { id: payload.sessionId },
+      });
+      if (!session || session.isRevoked || session.expiresAt < new Date()) {
+        throw new UnauthorizedException('Session has been revoked or expired. Please sign in again.');
+      }
+    }
+
     return {
       id: user.id,
       email: user.email,
       name: user.name,
       role: user.role,
       schoolId: user.schoolId,
+      sessionId: payload.sessionId,
     };
   }
 }

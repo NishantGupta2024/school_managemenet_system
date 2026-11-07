@@ -7,6 +7,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateStudentAllocationDto } from './dto/create-student-allocation.dto';
 import { UpdateStudentAllocationDto } from './dto/update-student-allocation.dto';
+import { BulkStudentAllocationDto } from './dto/bulk-student-allocation.dto';
 import { AllocationStatus, ConcessionType, FeeFrequency, Prisma } from '@prisma/client';
 
 @Injectable()
@@ -442,5 +443,236 @@ export class StudentAllocationsService {
         },
       },
     });
+  }
+
+  async bulkCreate(
+    schoolId: string,
+    currentUserId: string,
+    dto: BulkStudentAllocationDto,
+  ) {
+    // 1. Verify Fee Structure belongs to this school and is ACTIVE
+    const structure = await this.prisma.feeStructure.findUnique({
+      where: {
+        schoolId_id: {
+          schoolId,
+          id: dto.feeStructureId,
+        },
+      },
+      include: {
+        items: true,
+      },
+    });
+
+    if (!structure) {
+      throw new BadRequestException(
+        `Fee structure ${dto.feeStructureId} does not belong to this school`,
+      );
+    }
+
+    if (structure.status !== 'ACTIVE') {
+      throw new BadRequestException('Cannot allocate an inactive or archived fee structure');
+    }
+
+    // 2. Verify Academic Year matches
+    if (structure.academicYearId !== dto.academicYearId) {
+      throw new BadRequestException(
+        'Academic year does not match the fee structure academic year',
+      );
+    }
+
+    // 3. Validate opted optional fee heads if any
+    const optedHeadIds = dto.optedFeeHeadIds || [];
+    const optionalItems = structure.items.filter((i) => i.isOptional);
+    const optionalHeadIds = new Set(optionalItems.map((i) => i.feeHeadId));
+
+    for (const optedId of optedHeadIds) {
+      if (!optionalHeadIds.has(optedId)) {
+        throw new BadRequestException(
+          `Fee head ${optedId} is not an optional component of this fee structure`,
+        );
+      }
+    }
+
+    // 4. Validate Concession Policy
+    const concessionType = dto.concessionType || ConcessionType.NONE;
+    const concessionValue = dto.concessionValue ?? 0;
+    let concessionReason = dto.concessionReason?.trim() || null;
+    let authorizedByUserId: string | null = null;
+
+    const totalBaseFee = this.calculateTotalBaseFee(structure.items, optedHeadIds);
+    const concessionDecimal = new Prisma.Decimal(concessionValue);
+
+    if (concessionType === ConcessionType.PERCENTAGE) {
+      if (concessionDecimal.lessThanOrEqualTo(0) || concessionDecimal.greaterThan(100)) {
+        throw new BadRequestException('Percentage concession must be between 0.01% and 100%');
+      }
+      if (!concessionReason) {
+        throw new BadRequestException('Concession reason is mandatory when concession is granted');
+      }
+      authorizedByUserId = currentUserId;
+    } else if (concessionType === ConcessionType.FLAT_DISCOUNT) {
+      if (concessionDecimal.lessThanOrEqualTo(0)) {
+        throw new BadRequestException('Flat discount concession must be greater than 0');
+      }
+      if (concessionDecimal.greaterThan(totalBaseFee)) {
+        throw new BadRequestException(
+          `Flat discount concession (${concessionDecimal.toFixed(2)}) cannot exceed total base fee (${totalBaseFee.toFixed(2)})`,
+        );
+      }
+      if (!concessionReason) {
+        throw new BadRequestException('Concession reason is mandatory when concession is granted');
+      }
+      authorizedByUserId = currentUserId;
+    } else {
+      concessionReason = null;
+      authorizedByUserId = null;
+    }
+
+    // Deduplicate input studentIds
+    const uniqueStudentIds = Array.from(new Set(dto.studentIds));
+
+    // 5. Pre-fetch target students belonging to this school
+    const students = await this.prisma.student.findMany({
+      where: {
+        schoolId,
+        id: { in: uniqueStudentIds },
+      },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        admissionNumber: true,
+        gradeId: true,
+        status: true,
+      },
+    });
+    const studentMap = new Map(students.map((s) => [s.id, s]));
+
+    // 6. Pre-fetch existing allocations for these students in this academic year
+    const existingAllocations = await this.prisma.studentFeeAllocation.findMany({
+      where: {
+        schoolId,
+        academicYearId: dto.academicYearId,
+        studentId: { in: uniqueStudentIds },
+      },
+      select: {
+        studentId: true,
+        id: true,
+        feeStructureId: true,
+      },
+    });
+    const existingAllocMap = new Map(existingAllocations.map((a) => [a.studentId, a]));
+
+    const results: {
+      studentId: string;
+      studentName: string;
+      admissionNumber: string;
+      status: 'ALLOCATED' | 'SKIPPED' | 'FAILED';
+      allocationId?: string;
+      reason?: string;
+    }[] = [];
+
+    const toInsert: {
+      schoolId: string;
+      studentId: string;
+      feeStructureId: string;
+      academicYearId: string;
+      concessionType: ConcessionType;
+      concessionValue: Prisma.Decimal;
+      concessionReason: string | null;
+      authorizedByUserId: string | null;
+      optedFeeHeadIds: string[];
+    }[] = [];
+
+    for (const studentId of uniqueStudentIds) {
+      const student = studentMap.get(studentId);
+      if (!student) {
+        results.push({
+          studentId,
+          studentName: 'Unknown',
+          admissionNumber: 'N/A',
+          status: 'FAILED',
+          reason: 'Student not found in this school',
+        });
+        continue;
+      }
+
+      const fullName = `${student.firstName} ${student.lastName}`.trim();
+
+      // Check if already allocated for this session
+      if (existingAllocMap.has(studentId)) {
+        results.push({
+          studentId,
+          studentName: fullName,
+          admissionNumber: student.admissionNumber,
+          status: 'SKIPPED',
+          reason: 'Already allocated for this academic session',
+        });
+        continue;
+      }
+
+      // Check grade match
+      if (structure.gradeId !== student.gradeId) {
+        results.push({
+          studentId,
+          studentName: fullName,
+          admissionNumber: student.admissionNumber,
+          status: 'FAILED',
+          reason: `Student grade does not match fee structure grade`,
+        });
+        continue;
+      }
+
+      toInsert.push({
+        schoolId,
+        studentId,
+        feeStructureId: dto.feeStructureId,
+        academicYearId: dto.academicYearId,
+        concessionType,
+        concessionValue:
+          concessionType === ConcessionType.NONE
+            ? new Prisma.Decimal('0.00')
+            : concessionDecimal.toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP),
+        concessionReason,
+        authorizedByUserId,
+        optedFeeHeadIds: optedHeadIds,
+      });
+    }
+
+    // 7. Transactional insertion for all eligible students
+    if (toInsert.length > 0) {
+      const createdRecords = await this.prisma.$transaction(
+        toInsert.map((item) =>
+          this.prisma.studentFeeAllocation.create({
+            data: item,
+            select: { id: true, studentId: true },
+          }),
+        ),
+      );
+
+      const createdMap = new Map(createdRecords.map((c) => [c.studentId, c.id]));
+      for (const item of toInsert) {
+        const student = studentMap.get(item.studentId)!;
+        results.push({
+          studentId: item.studentId,
+          studentName: `${student.firstName} ${student.lastName}`.trim(),
+          admissionNumber: student.admissionNumber,
+          status: 'ALLOCATED',
+          allocationId: createdMap.get(item.studentId),
+        });
+      }
+    }
+
+    const allocatedCount = results.filter((r) => r.status === 'ALLOCATED').length;
+    const skippedCount = results.filter((r) => r.status === 'SKIPPED').length;
+    const failedCount = results.filter((r) => r.status === 'FAILED').length;
+
+    return {
+      totalRequested: uniqueStudentIds.length,
+      allocatedCount,
+      skippedCount,
+      failedCount,
+      results,
+    };
   }
 }

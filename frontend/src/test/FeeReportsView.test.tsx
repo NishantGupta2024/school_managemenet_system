@@ -737,11 +737,11 @@ describe('FeeReportsView Component', () => {
       fireEvent.click(screen.getByRole('tab', { name: /Collection Summary/i }));
       await waitFor(() => expect(reportsApi.getCollectionSummary).toHaveBeenCalledTimes(1));
 
-      // Invert dates
+      // Invert dates such that start date is after end date
       const startDateInput = screen.getByLabelText(/Start Date/i);
       const endDateInput = screen.getByLabelText(/End Date/i);
-      fireEvent.change(startDateInput, { target: { value: '2026-10-31' } });
       fireEvent.change(endDateInput, { target: { value: '2026-10-01' } });
+      fireEvent.change(startDateInput, { target: { value: '2026-10-31' } });
 
       // Click Apply Filters
       fireEvent.click(screen.getByRole('button', { name: /Apply Filters/i }));

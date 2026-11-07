@@ -23,6 +23,7 @@ import { OutstandingDuesQueryDto } from './dto/outstanding-dues-query.dto';
 import { ClassCollectionQueryDto } from './dto/class-collection-query.dto';
 import { FineSummaryQueryDto } from './dto/fine-summary-query.dto';
 import { ExportReportQueryDto } from './dto/export-report-query.dto';
+import { GatewayReconciliationQueryDto } from './dto/gateway-reconciliation-query.dto';
 
 @Controller('reports')
 @UseGuards(JwtAuthGuard, TenantGuard, RolesGuard)
@@ -129,6 +130,19 @@ export class ReportsController {
   ) {
     const school = req.school;
     return this.reportsService.getCollectionSummary(school, query);
+  }
+
+  @Get('reconciliation/gateway')
+  @Roles(
+    UserRole.PLATFORM_SUPER_ADMIN,
+    UserRole.SCHOOL_ADMIN,
+  )
+  async getGatewayReconciliationReport(
+    @Request() req: any,
+    @Query() query: GatewayReconciliationQueryDto,
+  ) {
+    const school = req.school;
+    return this.reportsService.getGatewayReconciliationReport(school, query);
   }
 
   @Get('config/:reportType')

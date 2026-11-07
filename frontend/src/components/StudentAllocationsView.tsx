@@ -9,6 +9,7 @@ import {
   GradeClass,
   AcademicYear,
   ConcessionType,
+  BulkAllocationResult,
 } from '../services/api';
 import {
   Plus,
@@ -19,6 +20,8 @@ import {
   UserCheck,
   Search,
   Filter,
+  Users,
+  X,
 } from 'lucide-react';
 
 export const StudentAllocationsView: React.FC = () => {
@@ -51,6 +54,19 @@ export const StudentAllocationsView: React.FC = () => {
     concessionReason: '',
     optedFeeHeadIds: [] as string[],
   });
+
+  // Bulk Modal State
+  const [isBulkModalOpen, setIsBulkModalOpen] = useState(false);
+  const [bulkGradeId, setBulkGradeId] = useState('');
+  const [bulkAcademicYearId, setBulkAcademicYearId] = useState('');
+  const [bulkFeeStructureId, setBulkFeeStructureId] = useState('');
+  const [selectedStudentIds, setSelectedStudentIds] = useState<string[]>([]);
+  const [bulkConcessionType, setBulkConcessionType] = useState<ConcessionType>('NONE');
+  const [bulkConcessionValue, setBulkConcessionValue] = useState<number>(0);
+  const [bulkConcessionReason, setBulkConcessionReason] = useState<string>('');
+  const [bulkSubmitting, setBulkSubmitting] = useState(false);
+  const [bulkError, setBulkError] = useState<string | null>(null);
+  const [bulkResult, setBulkResult] = useState<BulkAllocationResult | null>(null);
 
   const loadData = async () => {
     try {
@@ -231,6 +247,149 @@ export const StudentAllocationsView: React.FC = () => {
     }
   };
 
+  // Bulk Allocation Helpers
+  const bulkMatchingStructures = structures.filter(
+    (s) =>
+      (!bulkGradeId || s.gradeId === bulkGradeId) &&
+      (!bulkAcademicYearId || s.academicYearId === bulkAcademicYearId)
+  );
+
+  const bulkGradeStudents = students.filter(
+    (s) => !bulkGradeId || s.gradeId === bulkGradeId
+  );
+
+  const isStudentAllocatedInSession = (studentId: string, sessionId: string) => {
+    return allocations.some(
+      (a) => a.studentId === studentId && a.academicYearId === sessionId
+    );
+  };
+
+  const getStudentExistingStructureName = (studentId: string, sessionId: string) => {
+    const existing = allocations.find(
+      (a) => a.studentId === studentId && a.academicYearId === sessionId
+    );
+    return existing?.feeStructure?.name || 'Assigned';
+  };
+
+  const handleOpenBulkModal = () => {
+    setIsBulkModalOpen(true);
+    setBulkResult(null);
+    setBulkError(null);
+    const curYear = academicYears.find((y) => y.isCurrent)?.id || academicYears[0]?.id || '';
+    setBulkAcademicYearId(curYear);
+    const firstGrade = grades[0]?.id || '';
+    setBulkGradeId(firstGrade);
+
+    const match = structures.find(
+      (s) => s.gradeId === firstGrade && s.academicYearId === curYear
+    );
+    setBulkFeeStructureId(match?.id || '');
+
+    const unallocated = students
+      .filter((s) => s.gradeId === firstGrade && !isStudentAllocatedInSession(s.id, curYear))
+      .map((s) => s.id);
+    setSelectedStudentIds(unallocated);
+  };
+
+  const handleBulkGradeChange = (gradeId: string) => {
+    setBulkGradeId(gradeId);
+    const match = structures.find(
+      (s) => s.gradeId === gradeId && s.academicYearId === bulkAcademicYearId
+    );
+    setBulkFeeStructureId(match?.id || '');
+
+    const unallocated = students
+      .filter((s) => s.gradeId === gradeId && !isStudentAllocatedInSession(s.id, bulkAcademicYearId))
+      .map((s) => s.id);
+    setSelectedStudentIds(unallocated);
+  };
+
+  const handleBulkYearChange = (yearId: string) => {
+    setBulkAcademicYearId(yearId);
+    const match = structures.find(
+      (s) => s.gradeId === bulkGradeId && s.academicYearId === yearId
+    );
+    setBulkFeeStructureId(match?.id || '');
+
+    const unallocated = students
+      .filter((s) => s.gradeId === bulkGradeId && !isStudentAllocatedInSession(s.id, yearId))
+      .map((s) => s.id);
+    setSelectedStudentIds(unallocated);
+  };
+
+  const toggleSelectStudent = (id: string) => {
+    setSelectedStudentIds((prev) =>
+      prev.includes(id) ? prev.filter((sId) => sId !== id) : [...prev, id]
+    );
+  };
+
+  const toggleSelectAllEligible = () => {
+    const eligible = bulkGradeStudents
+      .filter((s) => !isStudentAllocatedInSession(s.id, bulkAcademicYearId))
+      .map((s) => s.id);
+
+    const allSelected = eligible.every((id) => selectedStudentIds.includes(id));
+    if (allSelected) {
+      setSelectedStudentIds((prev) => prev.filter((id) => !eligible.includes(id)));
+    } else {
+      setSelectedStudentIds((prev) => Array.from(new Set([...prev, ...eligible])));
+    }
+  };
+
+  const handleBulkSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBulkError(null);
+
+    if (!bulkAcademicYearId) {
+      setBulkError('Please select an Academic Session');
+      return;
+    }
+    if (!bulkGradeId) {
+      setBulkError('Please select a Target Class / Grade');
+      return;
+    }
+    if (!bulkFeeStructureId) {
+      setBulkError('Please select a Fee Structure');
+      return;
+    }
+    if (selectedStudentIds.length === 0) {
+      setBulkError('Please select at least one student to allocate');
+      return;
+    }
+
+    if (bulkConcessionType !== 'NONE') {
+      if (bulkConcessionValue <= 0) {
+        setBulkError('Concession value must be greater than 0');
+        return;
+      }
+      if (!bulkConcessionReason.trim()) {
+        setBulkError('Concession justification reason is mandatory');
+        return;
+      }
+    }
+
+    try {
+      setBulkSubmitting(true);
+      const res = await studentAllocationsApi.bulkCreate({
+        academicYearId: bulkAcademicYearId,
+        feeStructureId: bulkFeeStructureId,
+        studentIds: selectedStudentIds,
+        concessionType: bulkConcessionType,
+        concessionValue: bulkConcessionValue,
+        concessionReason: bulkConcessionReason.trim() || undefined,
+      });
+
+      setBulkResult(res);
+      setSuccessMsg(`Bulk allocation completed: ${res.allocatedCount} allocated, ${res.skippedCount} skipped.`);
+      setTimeout(() => setSuccessMsg(null), 5000);
+      loadData();
+    } catch (err: any) {
+      setBulkError(err.response?.data?.message || 'Failed to complete bulk allocation');
+    } finally {
+      setBulkSubmitting(false);
+    }
+  };
+
   const filteredAllocations = allocations.filter((a) => {
     const s = a.student;
     const matchesSearch =
@@ -263,6 +422,13 @@ export const StudentAllocationsView: React.FC = () => {
             className="p-2.5 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition-colors"
           >
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+          </button>
+          <button
+            onClick={handleOpenBulkModal}
+            className="flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-medium text-sm rounded-xl shadow-sm transition-colors flex-1 sm:flex-none"
+          >
+            <Users className="w-4 h-4" />
+            Bulk Allocate
           </button>
           <button
             onClick={() => setIsModalOpen(true)}
@@ -693,6 +859,325 @@ export const StudentAllocationsView: React.FC = () => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk Allocation Modal */}
+      {isBulkModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl max-w-2xl w-full shadow-2xl border border-slate-100 overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+              <div>
+                <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                  <Users className="w-5 h-5 text-emerald-600" />
+                  Bulk Allocate Fee Structure
+                </h3>
+                <p className="text-xs text-slate-500 mt-1">
+                  Assign class-wide fee structures to multiple students. Existing allocations and custom concessions are automatically preserved.
+                </p>
+              </div>
+              <button
+                onClick={() => setIsBulkModalOpen(false)}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {bulkResult ? (
+              <div className="p-6 overflow-y-auto space-y-4">
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-xl text-center">
+                    <p className="text-2xl font-bold text-emerald-700">{bulkResult.allocatedCount}</p>
+                    <p className="text-xs font-medium text-emerald-800 mt-1">Successfully Allocated</p>
+                  </div>
+                  <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl text-center">
+                    <p className="text-2xl font-bold text-amber-700">{bulkResult.skippedCount}</p>
+                    <p className="text-xs font-medium text-amber-800 mt-1">Skipped (Already Allocated)</p>
+                  </div>
+                  <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl text-center">
+                    <p className="text-2xl font-bold text-slate-700">{bulkResult.failedCount}</p>
+                    <p className="text-xs font-medium text-slate-800 mt-1">Failed</p>
+                  </div>
+                </div>
+
+                <div className="border border-slate-200 rounded-xl overflow-hidden max-h-60 overflow-y-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-slate-50 text-slate-600 font-semibold border-b border-slate-200 sticky top-0">
+                      <tr>
+                        <th className="p-2.5">Student</th>
+                        <th className="p-2.5">Adm #</th>
+                        <th className="p-2.5">Status</th>
+                        <th className="p-2.5">Details</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {bulkResult.results.map((r) => (
+                        <tr key={r.studentId} className="hover:bg-slate-50/50">
+                          <td className="p-2.5 font-medium text-slate-900">{r.studentName}</td>
+                          <td className="p-2.5 text-slate-500 font-mono">{r.admissionNumber}</td>
+                          <td className="p-2.5">
+                            {r.status === 'ALLOCATED' && (
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
+                                Allocated
+                              </span>
+                            )}
+                            {r.status === 'SKIPPED' && (
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800">
+                                Skipped
+                              </span>
+                            )}
+                            {r.status === 'FAILED' && (
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-100 text-red-800">
+                                Failed
+                              </span>
+                            )}
+                          </td>
+                          <td className="p-2.5 text-slate-500">{r.reason || 'Completed successfully'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="flex justify-end pt-2">
+                  <button
+                    onClick={() => {
+                      setIsBulkModalOpen(false);
+                      setBulkResult(null);
+                    }}
+                    className="px-5 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-sm"
+                  >
+                    Done
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <form onSubmit={handleBulkSubmit} className="p-6 overflow-y-auto space-y-4 flex-1">
+                {bulkError && (
+                  <div className="p-3 bg-red-50 border border-red-200 text-red-700 text-xs rounded-xl flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4 shrink-0" />
+                    <span>{bulkError}</span>
+                  </div>
+                )}
+
+                {/* Configuration Row */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      Academic Session *
+                    </label>
+                    <select
+                      value={bulkAcademicYearId}
+                      onChange={(e) => handleBulkYearChange(e.target.value)}
+                      className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 bg-white focus:ring-2 focus:ring-indigo-500"
+                    >
+                      {academicYears.map((ay) => (
+                        <option key={ay.id} value={ay.id}>
+                          {ay.name} {ay.isCurrent ? '(Current)' : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      Target Class / Grade *
+                    </label>
+                    <select
+                      value={bulkGradeId}
+                      onChange={(e) => handleBulkGradeChange(e.target.value)}
+                      className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 bg-white focus:ring-2 focus:ring-indigo-500"
+                    >
+                      {grades.map((g) => (
+                        <option key={g.id} value={g.id}>
+                          {g.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      Fee Structure *
+                    </label>
+                    <select
+                      value={bulkFeeStructureId}
+                      onChange={(e) => setBulkFeeStructureId(e.target.value)}
+                      className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 bg-white focus:ring-2 focus:ring-indigo-500"
+                    >
+                      <option value="">-- Select Fee Structure --</option>
+                      {bulkMatchingStructures.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                {bulkMatchingStructures.length === 0 && bulkGradeId && (
+                  <p className="text-xs text-amber-600 bg-amber-50 p-2.5 rounded-lg border border-amber-200">
+                    No active fee structure found for this grade and session. Please create one in <b>Fee Structures</b> first.
+                  </p>
+                )}
+
+                {/* Students Checklist */}
+                <div>
+                  <div className="flex justify-between items-center mb-2">
+                    <label className="text-xs font-semibold text-slate-700">
+                      Eligible Students in {grades.find((g) => g.id === bulkGradeId)?.name || 'Class'}
+                    </label>
+                    <button
+                      type="button"
+                      onClick={toggleSelectAllEligible}
+                      className="text-xs text-indigo-600 hover:text-indigo-800 font-medium"
+                    >
+                      Toggle Select All Eligible
+                    </button>
+                  </div>
+
+                  <div className="border border-slate-200 rounded-xl overflow-hidden max-h-52 overflow-y-auto">
+                    {bulkGradeStudents.length === 0 ? (
+                      <p className="text-xs text-slate-500 p-4 text-center">
+                        No students enrolled in this grade.
+                      </p>
+                    ) : (
+                      <table className="w-full text-left text-xs">
+                        <thead className="bg-slate-50 text-slate-600 font-semibold border-b border-slate-200 sticky top-0">
+                          <tr>
+                            <th className="p-2.5 w-10">Select</th>
+                            <th className="p-2.5">Student Name</th>
+                            <th className="p-2.5">Adm #</th>
+                            <th className="p-2.5">Roll</th>
+                            <th className="p-2.5">Status</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {bulkGradeStudents.map((st) => {
+                            const alreadyAllocated = isStudentAllocatedInSession(st.id, bulkAcademicYearId);
+                            const isSelected = selectedStudentIds.includes(st.id);
+
+                            return (
+                              <tr
+                                key={st.id}
+                                className={`hover:bg-slate-50/50 cursor-pointer ${
+                                  alreadyAllocated ? 'bg-slate-50/30 opacity-70' : ''
+                                }`}
+                                onClick={() => !alreadyAllocated && toggleSelectStudent(st.id)}
+                              >
+                                <td className="p-2.5">
+                                  <input
+                                    type="checkbox"
+                                    disabled={alreadyAllocated}
+                                    checked={isSelected}
+                                    onChange={() => toggleSelectStudent(st.id)}
+                                    className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-40"
+                                    onClick={(e) => e.stopPropagation()}
+                                  />
+                                </td>
+                                <td className="p-2.5 font-medium text-slate-900">
+                                  {st.firstName} {st.lastName}
+                                </td>
+                                <td className="p-2.5 text-slate-500 font-mono">{st.admissionNumber}</td>
+                                <td className="p-2.5 text-slate-500 font-mono">{st.rollNumber || '-'}</td>
+                                <td className="p-2.5">
+                                  {alreadyAllocated ? (
+                                    <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 text-amber-800">
+                                      Allocated: {getStudentExistingStructureName(st.id, bulkAcademicYearId)}
+                                    </span>
+                                  ) : (
+                                    <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-100 text-emerald-800">
+                                      Eligible
+                                    </span>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-slate-500 mt-1">
+                    Selected: <b>{selectedStudentIds.length}</b> student(s). Already allocated students are automatically skipped to protect existing fee records.
+                  </p>
+                </div>
+
+                {/* Default Concession (Optional) */}
+                <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-3">
+                  <div className="flex justify-between items-center">
+                    <label className="text-xs font-semibold text-slate-700">
+                      Standard Concession Policy (Optional)
+                    </label>
+                    <span className="text-[10px] text-slate-500">Applies to unallocated students only</span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <select
+                        value={bulkConcessionType}
+                        onChange={(e) => setBulkConcessionType(e.target.value as ConcessionType)}
+                        className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-300 bg-white"
+                      >
+                        <option value="NONE">No Concession (Standard Fee)</option>
+                        <option value="PERCENTAGE">Percentage (%) Discount</option>
+                        <option value="FLAT_DISCOUNT">Flat Amount (₹) Discount</option>
+                      </select>
+                    </div>
+
+                    {bulkConcessionType !== 'NONE' && (
+                      <div>
+                        <input
+                          type="number"
+                          step={bulkConcessionType === 'PERCENTAGE' ? '0.1' : '1'}
+                          min="0.01"
+                          max={bulkConcessionType === 'PERCENTAGE' ? 100 : undefined}
+                          required
+                          placeholder={bulkConcessionType === 'PERCENTAGE' ? 'Discount % (e.g. 10)' : 'Amount ₹'}
+                          value={bulkConcessionValue || ''}
+                          onChange={(e) => setBulkConcessionValue(parseFloat(e.target.value) || 0)}
+                          className="w-full px-2.5 py-1.5 text-xs font-mono rounded-lg border border-slate-300 bg-white"
+                        />
+                      </div>
+                    )}
+                  </div>
+
+                  {bulkConcessionType !== 'NONE' && (
+                    <div>
+                      <input
+                        type="text"
+                        required
+                        placeholder="Auditable concession justification / reason (e.g. Merit Quota)..."
+                        value={bulkConcessionReason}
+                        onChange={(e) => setBulkConcessionReason(e.target.value)}
+                        className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-300 bg-white"
+                      />
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-100">
+                  <button
+                    type="button"
+                    onClick={() => setIsBulkModalOpen(false)}
+                    className="px-4 py-2 text-sm font-medium text-slate-600 hover:text-slate-800 rounded-lg transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={bulkSubmitting || selectedStudentIds.length === 0 || !bulkFeeStructureId}
+                    className="px-5 py-2 text-sm font-medium text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-sm transition-colors disabled:opacity-50"
+                  >
+                    {bulkSubmitting
+                      ? 'Allocating...'
+                      : `Bulk Allocate (${selectedStudentIds.length} Students)`}
+                  </button>
+                </div>
+              </form>
+            )}
           </div>
         </div>
       )}

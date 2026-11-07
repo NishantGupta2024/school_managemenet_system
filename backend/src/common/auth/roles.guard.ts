@@ -13,20 +13,18 @@ export class RolesGuard implements CanActivate {
       context.getClass(),
     ]);
 
+    const request = context.switchToHttp().getRequest();
+    const user = request?.user;
+    if (!user || !user.role) {
+      throw new ForbiddenException('Access denied: Authentication required for this resource');
+    }
+
     if (!requiredRoles || requiredRoles.length === 0) {
       return true;
     }
 
-    const { user } = context.switchToHttp().getRequest();
-    if (!user) {
-      throw new ForbiddenException('Access denied: Authentication required for this resource');
-    }
-
-    // Platform Super Admin bypasses school-level role restrictions
-    if (user.role === UserRole.PLATFORM_SUPER_ADMIN) {
-      return true;
-    }
-
+    // Strict explicit RBAC evaluation: every allowed role (including PLATFORM_SUPER_ADMIN)
+    // must be explicitly declared in the @Roles(...) metadata on the handler or controller.
     const hasRole = requiredRoles.includes(user.role);
     if (!hasRole) {
       throw new ForbiddenException(`Access denied: Requires one of [${requiredRoles.join(', ')}] role`);

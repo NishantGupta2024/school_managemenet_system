@@ -1,0 +1,120 @@
+name: Continuous Integration (CI)
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+    branches:
+      - main
+      - master
+
+# Restrict default permissions to read-only
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ----------------------------------------------------------------------------
+  # Job 1: Backend CI (Build, Unit Tests & Static Verification)
+  # ----------------------------------------------------------------------------
+  backend-ci:
+    name: Backend Build & Test Suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22 LTS
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install Monorepo Dependencies
+        run: npm ci
+
+      - name: Generate Prisma Client
+        run: npm run prisma:generate --workspace=backend
+        env:
+          DATABASE_URL: "postgresql://ci_dummy_user:ci_dummy_pass@localhost:5432/ci_dummy_db?schema=public"
+
+      - name: Build NestJS Application
+        run: npm run build --workspace=backend
+
+      - name: Execute Backend Unit & Integrity Tests
+        run: |
+          npm --prefix backend test -- \
+            src/auth \
+            src/common/tenant/tenant.guard.spec.ts \
+            src/health/health.service.spec.ts \
+            src/payments/razorpay-mode.validator.spec.ts \
+            src/payments/payments-integrity.spec.ts \
+            src/payments/online-payments.service.spec.ts \
+            src/payments/razorpay-webhook.service.spec.ts \
+            src/schools/school-payment-gateway-config.service.spec.ts \
+            src/students/students.service.spec.ts \
+            src/notifications/tests/mailtrap-rate-limiter.spec.ts \
+            src/notifications/templates/email-template.spec.ts \
+            src/notifications/templates/email-template-reminders.spec.ts \
+            src/notifications/worker/notification-outbox.worker.spec.ts \
+            src/notifications/outbox/notification-outbox.service.spec.ts \
+            src/notifications/reminders/fee-reminder.scheduler.spec.ts \
+            src/notifications/reminders/fee-reminder.service.spec.ts \
+            src/backup/database-backup.spec.ts
+        env:
+          NODE_ENV: test
+          ALLOW_LIVE_PAYMENT_GATEWAY: "false"
+          GATEWAY_ENCRYPTION_KEY: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+          JWT_SECRET: "ci-dummy-jwt-secret-minimum-32-chars-for-testing"
+
+  # ----------------------------------------------------------------------------
+  # Job 2: Frontend CI (TypeScript Typecheck & Vite Production Build)
+  # ----------------------------------------------------------------------------
+  frontend-ci:
+    name: Frontend Build & Typecheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22 LTS
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install Monorepo Dependencies
+        run: npm ci
+
+      - name: Build Frontend Application (tsc -b && vite build)
+        run: npm run build --workspace=frontend
+
+  # ----------------------------------------------------------------------------
+  # Job 3: Infrastructure Validation (Docker Compose Schema & Syntax)
+  # ----------------------------------------------------------------------------
+  infra-validation:
+    name: Infrastructure & Docker Compose Validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Validate Production Docker Compose Specification
+        run: |
+          docker compose -f docker-compose.prod.yml config
+        env:
+          POSTGRES_PASSWORD: "ci_dummy_db_password"
+          REDIS_PASSWORD: "ci_dummy_redis_password"
+          JWT_SECRET: "ci_dummy_jwt_secret_value_for_config_validation"
+          GATEWAY_ENCRYPTION_KEY: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
