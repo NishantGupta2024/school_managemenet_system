@@ -134,7 +134,7 @@ describe('Examination API Client', () => {
     expect(res).toEqual(mockResult);
   });
 
-  it('calls previewImport with FormData and multipart header', async () => {
+  it('calls previewImport with FormData payload without Content-Type override', async () => {
     const mockPreview = { totalRows: 5, validCount: 5, invalidCount: 0 };
     (api.post as any).mockResolvedValueOnce({ data: mockPreview });
 
@@ -146,7 +146,6 @@ describe('Examination API Client', () => {
     expect(api.post).toHaveBeenCalledWith(
       '/examination/assessments/as-1/questions/import/preview',
       expect.any(FormData),
-      { headers: { 'Content-Type': 'multipart/form-data' } },
     );
     expect(res).toEqual(mockPreview);
   });

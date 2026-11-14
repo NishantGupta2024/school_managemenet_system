@@ -46,9 +46,16 @@ api.interceptors.request.use((config) => {
     config.headers.Authorization = `Bearer ${token}`;
   }
 
-  // Allow browser to generate multipart boundary automatically for FormData
-  if (config.data instanceof FormData) {
-    delete config.headers['Content-Type'];
+  // Allow browser to generate multipart boundary automatically for FormData without triggering Axios urlencoded fallback
+  if (
+    (typeof FormData !== 'undefined' && config.data instanceof FormData) ||
+    (config.data && typeof (config.data as any).append === 'function')
+  ) {
+    if (typeof config.headers?.setContentType === 'function') {
+      config.headers.setContentType(null);
+    } else if (config.headers) {
+      delete config.headers['Content-Type'];
+    }
   }
 
   // Determine if request is public (login, health)

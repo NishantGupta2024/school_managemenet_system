@@ -731,7 +731,6 @@ export const examinationApi = {
     const res = await api.post<QuestionImportPreviewResponse>(
       `/examination/assessments/${assessmentId}/questions/import/preview`,
       formData,
-      { headers: { 'Content-Type': 'multipart/form-data' } },
     );
     return res.data;
   },
