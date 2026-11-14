@@ -73,6 +73,111 @@ export interface QueryChaptersDto {
 // Assessment Interfaces & DTOs
 // =============================================================================
 
+export enum ViolationEventType {
+  FULLSCREEN_EXIT = 'FULLSCREEN_EXIT',
+  TAB_BLUR = 'TAB_BLUR',
+  VISIBILITY_HIDDEN = 'VISIBILITY_HIDDEN',
+  MULTIPLE_FACES = 'MULTIPLE_FACES',
+  NO_FACE = 'NO_FACE',
+  SUSPICIOUS_AUDIO = 'SUSPICIOUS_AUDIO',
+  NETWORK_ANOMALY = 'NETWORK_ANOMALY',
+  OBJECT_DETECTED = 'OBJECT_DETECTED',
+}
+
+export interface MonitoringConfig {
+  requireFullscreen?: boolean;
+  detectTabSwitch?: boolean;
+  requireWebcam?: boolean;
+  requireMic?: boolean;
+  maxWarnings?: number;
+  blockOnThreshold?: boolean;
+}
+
+export interface PreflightData {
+  latencyMs?: number;
+  downloadMbps?: number;
+  uploadMbps?: number;
+  bandwidthStatus?: 'OPTIMAL' | 'ACCEPTABLE' | 'DEGRADED';
+  speedWarningAcknowledged?: boolean;
+  fullscreenSupported?: boolean;
+  cameraTested?: boolean;
+  livenessPassed?: boolean;
+  livenessChallenge?: 'TURN_LEFT' | 'TURN_RIGHT';
+  livenessExemptionAcknowledged?: boolean;
+  livenessTimestamp?: string;
+  micTested?: boolean;
+  ambientBaselineDb?: number;
+  browser?: string;
+  os?: string;
+  timestamp?: string;
+}
+
+export interface ViolationEventRecord {
+  id: string;
+  eventType: ViolationEventType;
+  timestamp: string;
+  durationMs?: number | null;
+  metadata?: any;
+  dismissed: boolean;
+  createdAt: string;
+}
+
+export interface IntegrityAuditResponse {
+  attempt: {
+    id: string;
+    status: AttemptStatus;
+    startedAt: string;
+    deadlineAt: string;
+    submittedAt: string | null;
+    proctoringPassed: boolean;
+    preflightData: PreflightData | null;
+    flaggedForReview: boolean;
+    studentExplanation: string | null;
+    isLocked?: boolean;
+    activeMisconductViolations?: number;
+    maxAllowed?: number;
+  };
+  assessment: {
+    id: string;
+    title: string;
+    enableProctoring: boolean;
+    monitoringConfig: MonitoringConfig | null;
+  };
+  student: {
+    id: string;
+    admissionNumber: string;
+    rollNumber: string | null;
+    firstName: string;
+    lastName: string;
+  };
+  events: ViolationEventRecord[];
+  summary: {
+    totalEvents: number;
+    activeViolations: number;
+    activeMisconductViolations?: number;
+    maxAllowed?: number;
+    isLocked?: boolean;
+    eventCounts: Record<string, number>;
+  };
+}
+
+export interface AssessmentAttemptSummary {
+  id: string;
+  studentId: string;
+  studentName: string;
+  admissionNumber: string | null;
+  rollNumber: string | null;
+  status: AttemptStatus;
+  warningCount: number;
+  totalViolationsCount: number;
+  maxWarnings: number;
+  isLocked: boolean;
+  flaggedForReview: boolean;
+  startedAt: string;
+  deadlineAt: string;
+  submittedAt: string | null;
+}
+
 export interface AssessmentDraft {
   id: string;
   schoolId: string;
@@ -93,6 +198,8 @@ export interface AssessmentDraft {
   endWindowAt: string | null;
   shuffleQuestions: boolean;
   shuffleOptions: boolean;
+  enableProctoring?: boolean;
+  monitoringConfig?: MonitoringConfig | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -114,6 +221,8 @@ export interface CreateAssessmentDraftDto {
   endWindowAt?: string | null;
   shuffleQuestions?: boolean;
   shuffleOptions?: boolean;
+  enableProctoring?: boolean;
+  monitoringConfig?: MonitoringConfig;
 }
 
 export interface UpdateAssessmentDraftDto {
@@ -132,6 +241,8 @@ export interface UpdateAssessmentDraftDto {
   endWindowAt?: string | null;
   shuffleQuestions?: boolean;
   shuffleOptions?: boolean;
+  enableProctoring?: boolean;
+  monitoringConfig?: MonitoringConfig;
 }
 
 export interface QueryAssessmentsDto {
@@ -308,6 +419,9 @@ export interface StudentAssessmentOverview {
   hasAttempt: boolean;
   attemptStatus: AttemptStatus | null;
   attemptId: string | null;
+  enableProctoring?: boolean;
+  monitoringConfig?: MonitoringConfig | null;
+  proctoringPassed?: boolean;
 }
 
 export interface StudentSanitizedQuestion {
@@ -330,6 +444,15 @@ export interface StudentAttemptDetail {
   deadlineAt: string;
   remainingSeconds: number;
   submittedAt: string | null;
+  enableProctoring?: boolean;
+  monitoringConfig?: MonitoringConfig | null;
+  proctoringPassed?: boolean;
+  preflightData?: PreflightData | null;
+  flaggedForReview?: boolean;
+  studentExplanation?: string | null;
+  isLocked?: boolean;
+  activeWarningsCount?: number;
+  maxWarnings?: number;
   questions: StudentSanitizedQuestion[];
   answers: Record<string, number | null>;
 }
@@ -406,6 +529,14 @@ export interface ParentAssessmentHistoryItem {
 export interface ParentStudentAssessmentHistoryResponse {
   studentId: string;
   assessments: ParentAssessmentHistoryItem[];
+}
+
+export interface StudentChapterOption {
+  id: string;
+  chapterCode: string;
+  title: string;
+  subject: string;
+  orderIndex: number;
 }
 
 export interface ChapterProgressionAssessmentItem {
@@ -629,7 +760,6 @@ export const examinationApi = {
     const res = await api.post<QuestionImagePublicDto>(
       `/examination/assessments/${assessmentId}/questions/${questionId}/image`,
       formData,
-      { headers: { 'Content-Type': 'multipart/form-data' } },
     );
     return res.data;
   },
@@ -700,6 +830,11 @@ export const examinationApi = {
     const res = await api.get<StudentResultView>(
       `/examination/student/assessments/${assessmentId}/result`,
     );
+    return res.data;
+  },
+
+  getStudentChapters: async (): Promise<StudentChapterOption[]> => {
+    const res = await api.get<StudentChapterOption[]>('/examination/student/chapters');
     return res.data;
   },
 
@@ -792,6 +927,187 @@ export const examinationApi = {
   getPlatformLeaderboardMetrics: async (): Promise<PlatformLeaderboardMetrics> => {
     const res = await api.get<PlatformLeaderboardMetrics>(
       '/examination/platform/leaderboard/metrics',
+    );
+    return res.data;
+  },
+
+  // ---------------------------------------------------------------------------
+  // 9. Proctoring & Readiness Checks
+  // ---------------------------------------------------------------------------
+  testNetworkReadiness: async (
+    samplePayload: string = 'ping',
+  ): Promise<{ receivedAt: string; payloadSize: number; latencyMs: number }> => {
+    const start = performance.now();
+    const res = await api.post<{ receivedAt: string; payloadSize: number }>(
+      '/examination/student/preflight/network-check',
+      { data: samplePayload },
+    );
+    const latencyMs = Math.round(performance.now() - start);
+    return { ...res.data, latencyMs };
+  },
+
+  testBandwidthSpeed: async (): Promise<{
+    latencyMs: number;
+    downloadMbps: number;
+    uploadMbps: number;
+    bandwidthStatus: 'OPTIMAL' | 'ACCEPTABLE' | 'DEGRADED';
+  }> => {
+    // 1. Latency: Measure median of 3 pings to local backend
+    const pings: number[] = [];
+    for (let i = 0; i < 3; i++) {
+      const t0 = performance.now();
+      await api.get<{ receivedAt: string }>('/examination/student/preflight/ping', {
+        headers: { 'Cache-Control': 'no-cache' },
+      });
+      pings.push(performance.now() - t0);
+    }
+    pings.sort((a, b) => a - b);
+    const latencyMs = Math.max(1, Math.round(pings[1] || pings[0] || 10));
+
+    // 2. Download speed: GET 250 KB binary probe
+    const tDownStart = performance.now();
+    const dlRes = await api.get('/examination/student/preflight/download-sample', {
+      responseType: 'arraybuffer',
+      headers: { 'Cache-Control': 'no-store, no-cache' },
+    });
+    const tDownElapsed = Math.max((performance.now() - tDownStart) / 1000, 0.001);
+    const downloadedBytes = (dlRes.data as ArrayBuffer)?.byteLength || 250 * 1024;
+    const downloadBits = downloadedBytes * 8;
+    const downloadMbps = Number((downloadBits / (tDownElapsed * 1_000_000)).toFixed(2));
+
+    // 3. Upload speed: POST 64 KB probe
+    const uploadPayload = 'U'.repeat(64 * 1024);
+    const tUpStart = performance.now();
+    await api.post('/examination/student/preflight/upload-sample', {
+      data: uploadPayload,
+    });
+    const tUpElapsed = Math.max((performance.now() - tUpStart) / 1000, 0.001);
+    const uploadBytes = 64 * 1024;
+    const uploadBits = uploadBytes * 8;
+    const uploadMbps = Number((uploadBits / (tUpElapsed * 1_000_000)).toFixed(2));
+
+    // Threshold classification
+    let bandwidthStatus: 'OPTIMAL' | 'ACCEPTABLE' | 'DEGRADED' = 'OPTIMAL';
+    if (latencyMs > 350 || downloadMbps < 0.8 || uploadMbps < 0.3) {
+      bandwidthStatus = 'DEGRADED';
+    } else if (latencyMs > 150 || downloadMbps < 2.0 || uploadMbps < 1.0) {
+      bandwidthStatus = 'ACCEPTABLE';
+    }
+
+    return {
+      latencyMs,
+      downloadMbps,
+      uploadMbps,
+      bandwidthStatus,
+    };
+  },
+
+  completePreflight: async (
+    attemptId: string,
+    preflightData: PreflightData,
+  ): Promise<{ success: boolean; proctoringPassed: boolean }> => {
+    const res = await api.post<{ success: boolean; proctoringPassed: boolean }>(
+      `/examination/student/attempts/${attemptId}/preflight-complete`,
+      { preflightData },
+    );
+    return res.data;
+  },
+
+  recordViolationEvent: async (
+    attemptId: string,
+    eventType: ViolationEventType,
+    durationMs?: number,
+    metadata?: any,
+  ): Promise<{
+    recorded: boolean;
+    eventId?: string;
+    eventType?: string;
+    totalViolations?: number;
+    activeMisconductViolations?: number;
+    maxAllowed?: number;
+    flaggedForReview?: boolean;
+    isLocked?: boolean;
+    throttled?: boolean;
+    message?: string;
+  }> => {
+    const res = await api.post<{
+      recorded: boolean;
+      eventId?: string;
+      eventType?: string;
+      totalViolations?: number;
+      activeMisconductViolations?: number;
+      maxAllowed?: number;
+      flaggedForReview?: boolean;
+      isLocked?: boolean;
+      throttled?: boolean;
+      message?: string;
+    }>(`/examination/student/attempts/${attemptId}/events`, {
+      eventType,
+      durationMs,
+      metadata,
+    });
+    return res.data;
+  },
+
+  recordStudentExplanation: async (
+    attemptId: string,
+    explanation: string,
+  ): Promise<{ success: boolean }> => {
+    const res = await api.post<{ success: boolean }>(
+      `/examination/student/attempts/${attemptId}/explanation`,
+      { explanation },
+    );
+    return res.data;
+  },
+
+  listAssessmentAttempts: async (
+    assessmentId: string,
+  ): Promise<AssessmentAttemptSummary[]> => {
+    const res = await api.get<AssessmentAttemptSummary[]>(
+      `/examination/assessments/${assessmentId}/attempts`,
+    );
+    return res.data;
+  },
+
+  getAttemptIntegrityAudit: async (
+    assessmentId: string,
+    attemptId: string,
+  ): Promise<IntegrityAuditResponse> => {
+    const res = await api.get<IntegrityAuditResponse>(
+      `/examination/assessments/${assessmentId}/attempts/${attemptId}/integrity-audit`,
+    );
+    return res.data;
+  },
+
+  dismissViolationEvent: async (
+    assessmentId: string,
+    attemptId: string,
+    eventId: string,
+  ): Promise<{
+    success: boolean;
+    dismissedEventId: string;
+    remainingActiveViolations: number;
+    remainingMisconductViolations: number;
+    isLocked: boolean;
+  }> => {
+    const res = await api.patch<{
+      success: boolean;
+      dismissedEventId: string;
+      remainingActiveViolations: number;
+      remainingMisconductViolations: number;
+      isLocked: boolean;
+    }>(
+      `/examination/assessments/${assessmentId}/attempts/${attemptId}/integrity-audit/${eventId}/dismiss`,
+    );
+    return res.data;
+  },
+
+  unlockAttempt: async (
+    assessmentId: string,
+    attemptId: string,
+  ): Promise<{ success: boolean; message: string; attemptId: string; isLocked: boolean }> => {
+    const res = await api.patch<{ success: boolean; message: string; attemptId: string; isLocked: boolean }>(
+      `/examination/assessments/${assessmentId}/attempts/${attemptId}/unlock`,
     );
     return res.data;
   },

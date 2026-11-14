@@ -236,7 +236,7 @@ export const FeeHeadsView: React.FC = () => {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm text-slate-600">
+            <table className="w-full min-w-[600px] text-left text-sm text-slate-600">
               <thead className="bg-slate-50 border-b border-slate-200 text-xs font-semibold text-slate-700 uppercase">
                 <tr>
                   <th className="py-3 px-4">Code</th>

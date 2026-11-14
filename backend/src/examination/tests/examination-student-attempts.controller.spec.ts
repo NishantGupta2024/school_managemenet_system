@@ -44,6 +44,7 @@ describe('ExaminationStudentAttemptsController - Unit Tests', () => {
 
     progressionServiceMock = {
       getChapterProgression: jest.fn(),
+      listChaptersForStudent: jest.fn(),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -93,6 +94,19 @@ describe('ExaminationStudentAttemptsController - Unit Tests', () => {
   });
 
   describe('Endpoint delegation', () => {
+    it('delegates listChapters to progression service', async () => {
+      progressionServiceMock.listChaptersForStudent.mockResolvedValue([
+        { id: mockChapterId, chapterCode: 'CH-1', title: 'Test', subject: 'Math', orderIndex: 1 },
+      ]);
+      const res = await controller.listChapters(mockReq);
+      expect(progressionServiceMock.listChaptersForStudent).toHaveBeenCalledWith(
+        mockSchoolId,
+        mockReq.user,
+      );
+      expect(res).toHaveLength(1);
+      expect(res[0].id).toBe(mockChapterId);
+    });
+
     it('delegates getChapterProgression to progression service', async () => {
       progressionServiceMock.getChapterProgression.mockResolvedValue({
         chapterId: mockChapterId,

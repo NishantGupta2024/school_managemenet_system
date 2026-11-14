@@ -162,14 +162,14 @@ export const PublicWebsiteView: React.FC = () => {
 
           {/* Right Column: Live Financial Collection HUD Card */}
           <div className="lg:col-span-6 relative">
-            <div className="bg-surface-container-lowest rounded-2xl border border-outline-variant/40 shadow-xl p-6 lg:p-7 relative z-10">
-              <div className="flex items-center justify-between pb-5 border-b border-outline-variant/20">
-                <div>
-                  <div className="text-sm font-semibold text-on-surface">Institutional Fee Collection HUD</div>
-                  <div className="text-xs text-secondary">Academic Session 2026–2027 • Term 1</div>
+            <div className="bg-surface-container-lowest rounded-2xl border border-outline-variant/40 shadow-xl p-4 sm:p-6 lg:p-7 relative z-10">
+              <div className="flex items-center justify-between pb-4 sm:pb-5 border-b border-outline-variant/20 gap-2">
+                <div className="min-w-0">
+                  <div className="text-xs sm:text-sm font-semibold text-on-surface truncate">Institutional Fee Collection HUD</div>
+                  <div className="text-[11px] sm:text-xs text-secondary truncate">Academic Session 2026–2027 • Term 1</div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-tertiary-fixed text-on-tertiary-fixed">
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] sm:text-[11px] font-semibold bg-tertiary-fixed text-on-tertiary-fixed">
                     <span className="w-1.5 h-1.5 rounded-full bg-tertiary"></span>
                     Operational
                   </span>
@@ -177,27 +177,73 @@ export const PublicWebsiteView: React.FC = () => {
               </div>
 
               {/* Metric Cards Row */}
-              <div className="grid grid-cols-3 gap-3 my-5">
-                <div className="p-3.5 rounded-xl bg-surface-container-low border border-outline-variant/30">
-                  <div className="text-[11px] font-medium text-secondary uppercase tracking-wider">Total Billed</div>
-                  <div className="text-lg font-bold text-on-surface mt-1">₹48,25,000</div>
-                  <div className="text-[10px] text-tertiary font-medium mt-0.5">100% Cohort Billed</div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 sm:gap-3 my-4 sm:my-5">
+                <div className="p-3 sm:p-3.5 rounded-xl bg-surface-container-low border border-outline-variant/30 flex items-center justify-between sm:block">
+                  <div>
+                    <div className="text-[10px] sm:text-[11px] font-medium text-secondary uppercase tracking-wider">Total Billed</div>
+                    <div className="text-base sm:text-lg font-bold text-on-surface mt-0.5 sm:mt-1">₹48,25,000</div>
+                  </div>
+                  <div className="text-[10px] text-tertiary font-medium text-right sm:text-left sm:mt-0.5">100% Cohort Billed</div>
                 </div>
-                <div className="p-3.5 rounded-xl bg-surface-container-low border border-outline-variant/30">
-                  <div className="text-[11px] font-medium text-secondary uppercase tracking-wider">Collected</div>
-                  <div className="text-lg font-bold text-tertiary mt-1">₹41,80,000</div>
-                  <div className="text-[10px] text-tertiary font-medium mt-0.5">86.6% Recovery</div>
+                <div className="p-3 sm:p-3.5 rounded-xl bg-surface-container-low border border-outline-variant/30 flex items-center justify-between sm:block">
+                  <div>
+                    <div className="text-[10px] sm:text-[11px] font-medium text-secondary uppercase tracking-wider">Collected</div>
+                    <div className="text-base sm:text-lg font-bold text-tertiary mt-0.5 sm:mt-1">₹41,80,000</div>
+                  </div>
+                  <div className="text-[10px] text-tertiary font-medium text-right sm:text-left sm:mt-0.5">86.6% Recovery</div>
                 </div>
-                <div className="p-3.5 rounded-xl bg-surface-container-low border border-outline-variant/30">
-                  <div className="text-[11px] font-medium text-secondary uppercase tracking-wider">Overdue Dues</div>
-                  <div className="text-lg font-bold text-error mt-1">₹6,45,000</div>
-                  <div className="text-[10px] text-error font-medium mt-0.5">Late Fines Active</div>
+                <div className="p-3 sm:p-3.5 rounded-xl bg-surface-container-low border border-outline-variant/30 flex items-center justify-between sm:block">
+                  <div>
+                    <div className="text-[10px] sm:text-[11px] font-medium text-secondary uppercase tracking-wider">Overdue Dues</div>
+                    <div className="text-base sm:text-lg font-bold text-error mt-0.5 sm:mt-1">₹6,45,000</div>
+                  </div>
+                  <div className="text-[10px] text-error font-medium text-right sm:text-left sm:mt-0.5">Late Fines Active</div>
                 </div>
               </div>
 
-              {/* Sample Real-Time Student Ledger Table */}
-              <div className="rounded-xl border border-outline-variant/30 overflow-hidden">
-                <table className="w-full text-left text-xs">
+              {/* Mobile Stacked Student Ledger Rows (< sm, e.g. 320px - 430px) */}
+              <div className="block sm:hidden divide-y divide-outline-variant/20 rounded-xl border border-outline-variant/30 overflow-hidden bg-surface-container-lowest">
+                <div className="p-3 space-y-1.5 hover:bg-surface-container-low/50 transition-colors">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-semibold text-xs text-on-surface">Aarav Sharma</span>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 shrink-0">
+                      Cleared
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between text-xs text-secondary">
+                    <span>Class 8-A</span>
+                    <span className="font-semibold font-mono text-on-surface">₹4,500.00</span>
+                  </div>
+                </div>
+                <div className="p-3 space-y-1.5 hover:bg-surface-container-low/50 transition-colors">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-semibold text-xs text-on-surface">Diya Sen</span>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 shrink-0">
+                      Pending Cheque
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between text-xs text-secondary">
+                    <span>Class 8-A</span>
+                    <span className="font-semibold font-mono text-on-surface">₹4,500.00</span>
+                  </div>
+                </div>
+                <div className="p-3 space-y-1.5 hover:bg-surface-container-low/50 transition-colors">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-semibold text-xs text-on-surface">Vivaan Patel</span>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 shrink-0">
+                      UPI Paid
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between text-xs text-secondary">
+                    <span>Class 8-B</span>
+                    <span className="font-semibold font-mono text-on-surface">₹3,200.00</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Desktop / Tablet Student Ledger Table (>= sm) */}
+              <div className="hidden sm:block rounded-xl border border-outline-variant/30 overflow-x-auto">
+                <table className="w-full min-w-[420px] text-left text-xs">
                   <thead className="bg-surface-container text-on-surface-variant font-semibold uppercase text-[10px] tracking-wider">
                     <tr>
                       <th className="py-2.5 px-3">Student Name</th>
@@ -241,9 +287,9 @@ export const PublicWebsiteView: React.FC = () => {
                 </table>
               </div>
 
-              <div className="mt-4 pt-3 border-t border-outline-variant/20 flex items-center justify-between text-[11px] text-secondary">
+              <div className="mt-4 pt-3 border-t border-outline-variant/20 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-1 sm:gap-2 text-[10px] sm:text-[11px] text-secondary">
                 <span>Direct integration with Razorpay, Cash Desk & Bank UTR</span>
-                <span className="font-semibold text-primary-container">Live Monolith Sync</span>
+                <span className="font-semibold text-primary-container shrink-0">Live Monolith Sync</span>
               </div>
             </div>
           </div>

@@ -16,8 +16,12 @@ const mockExaminationApi = vi.hoisted(() => ({
   saveAnswer: vi.fn(),
   submitAttempt: vi.fn(),
   getStudentAssessmentResult: vi.fn(),
+  getStudentChapters: vi.fn(),
   getChapterProgression: vi.fn(),
   getQuestionImageBlob: vi.fn(),
+  recordViolationEvent: vi.fn(),
+  completePreflightCheck: vi.fn(),
+  recordStudentExplanation: vi.fn(),
 }));
 
 // Mock the examinationApi service
@@ -119,6 +123,7 @@ describe('StudentExaminationPortal Component', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     (examinationApi.listStudentAssessments as any).mockResolvedValue(mockAssessments);
+    (examinationApi.getStudentChapters as any).mockResolvedValue([]);
     (examinationApi.startAssessment as any).mockResolvedValue(mockAttemptDetail);
     (examinationApi.getAttempt as any).mockResolvedValue(mockAttemptDetail);
     (examinationApi.saveAnswer as any).mockResolvedValue({
@@ -205,9 +210,18 @@ describe('StudentExaminationPortal Component', () => {
   // ---------------------------------------------------------------------------
   // 2. Chapter Progression Display
   // ---------------------------------------------------------------------------
-  it('checks chapter progression status on demand', async () => {
+  it('checks chapter progression status on demand via chapter selector', async () => {
+    (examinationApi.getStudentChapters as any).mockResolvedValueOnce([
+      {
+        id: '00000000-0000-0000-0000-000000000001',
+        chapterCode: 'CH-1',
+        title: 'Algebra Foundations',
+        subject: 'Mathematics',
+        orderIndex: 1,
+      },
+    ]);
     (examinationApi.getChapterProgression as any).mockResolvedValueOnce({
-      chapterId: 'ch-algebra-01',
+      chapterId: '00000000-0000-0000-0000-000000000001',
       isUnlocked: true,
       unlockedAt: new Date().toISOString(),
       configuredModes: [AssessmentMode.NORMAL_QUIZ],
@@ -224,16 +238,29 @@ describe('StudentExaminationPortal Component', () => {
 
     render(<StudentExaminationPortal />);
 
-    const chapterInput = screen.getByPlaceholderText('Enter Chapter ID...');
-    fireEvent.change(chapterInput, { target: { value: 'ch-algebra-01' } });
+    await waitFor(() => {
+      expect(screen.getByRole('combobox', { name: /Select Chapter/i })).toBeInTheDocument();
+    });
 
-    const checkBtn = screen.getByRole('button', { name: 'Check Status' });
-    fireEvent.click(checkBtn);
+    const select = screen.getByRole('combobox', { name: /Select Chapter/i });
+    fireEvent.change(select, { target: { value: '00000000-0000-0000-0000-000000000001' } });
 
     await waitFor(() => {
-      expect(examinationApi.getChapterProgression).toHaveBeenCalledWith('ch-algebra-01');
+      expect(examinationApi.getChapterProgression).toHaveBeenCalledWith('00000000-0000-0000-0000-000000000001');
       expect(screen.getByText('Unlocked')).toBeInTheDocument();
       expect(screen.getByText('RESOLVED_SUBMITTED')).toBeInTheDocument();
+    });
+  });
+
+  it('displays empty state message when no chapters are configured for student grade', async () => {
+    (examinationApi.getStudentChapters as any).mockResolvedValueOnce([]);
+
+    render(<StudentExaminationPortal />);
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(/No chapters are configured for your grade yet\. Please contact your teacher\./i),
+      ).toBeInTheDocument();
     });
   });
 
@@ -1410,6 +1437,69 @@ describe('StudentExaminationPortal Component', () => {
       await waitFor(() => expect(screen.getByText('Closed Exam Already Submitted')).toBeInTheDocument());
 
       expect(screen.getByRole('button', { name: /view submission & result/i })).toBeInTheDocument();
+    });
+
+    it('renders locked screen and disables answer options when attempt is locked', async () => {
+      const lockedAssessment = {
+        ...mockAssessments[0],
+        id: 'asm-locked-1',
+        title: 'Monitored Exam at Limit',
+        hasAttempt: true,
+        attemptStatus: AttemptStatus.IN_PROGRESS,
+        attemptId: 'att-locked-1',
+        enableProctoring: true,
+      };
+
+      const lockedAttempt = {
+        id: 'att-locked-1',
+        assessmentId: 'asm-locked-1',
+        studentId: 'st-1',
+        status: AttemptStatus.IN_PROGRESS,
+        startedAt: new Date().toISOString(),
+        deadlineAt: new Date(Date.now() + 600000).toISOString(),
+        remainingSeconds: 600,
+        submittedAt: null,
+        enableProctoring: true,
+        monitoringConfig: { requireFullscreen: true, maxWarnings: 3 },
+        proctoringPassed: true,
+        isLocked: true,
+        activeWarningsCount: 3,
+        maxWarnings: 3,
+        questions: [
+          {
+            id: 'q-1',
+            sectionId: 's1',
+            orderIndex: 1,
+            questionText: 'What is 2 + 2?',
+            options: ['3', '4', '5'],
+            marks: 1,
+            hasImage: false,
+            imageUrl: null,
+          },
+        ],
+        answers: { 'q-1': 1 },
+      };
+
+      (examinationApi.listStudentAssessments as any).mockResolvedValue([lockedAssessment]);
+      (examinationApi.getAttempt as any).mockResolvedValue(lockedAttempt);
+
+      render(<StudentExaminationPortal />);
+      await waitFor(() => expect(screen.getByText('Monitored Exam at Limit')).toBeInTheDocument());
+
+      fireEvent.click(screen.getByRole('button', { name: /resume in-progress attempt/i }));
+
+      await waitFor(() => {
+        expect(screen.getByText('Examination Locked by Proctoring Policy')).toBeInTheDocument();
+        expect(
+          screen.getByText(/Your exam session has been locked because you reached the proctoring warning threshold/i),
+        ).toBeInTheDocument();
+        expect(screen.getByText(/All 1 answer\(s\) saved prior to this lock have been securely stored/i)).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: /check status \/ re-check lock/i })).toBeInTheDocument();
+      });
+
+      // Confirm question card and radio options are not rendered while locked
+      expect(screen.queryByText('What is 2 + 2?')).not.toBeInTheDocument();
+      expect(screen.queryByRole('radio')).not.toBeInTheDocument();
     });
   });
 });

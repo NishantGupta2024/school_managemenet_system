@@ -86,4 +86,11 @@ export class CreateAssessmentDraftDto {
   @IsOptional()
   @IsBoolean({ message: 'shuffleOptions must be a boolean' })
   shuffleOptions?: boolean;
+
+  @IsOptional()
+  @IsBoolean({ message: 'enableProctoring must be a boolean' })
+  enableProctoring?: boolean;
+
+  @IsOptional()
+  monitoringConfig?: Record<string, any>;
 }

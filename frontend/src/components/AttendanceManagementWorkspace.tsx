@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, CalendarCheck, Lock, ShieldAlert } from 'lucide-react';
+import { CalendarCheck, Lock, ShieldAlert } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { UserRole, Teacher, getMyTeacherProfile } from '../services/api';
 import { AttendanceRegisterView } from './AttendanceRegisterView';
@@ -102,28 +102,17 @@ export const AttendanceManagementWorkspace: React.FC = () => {
     <div className="space-y-6">
       {/* Top Workspace Navigation Bar */}
       <div className="flex items-center justify-between bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => navigate('/app')}
-            className="p-2 border border-slate-200 hover:bg-slate-50 text-slate-600 rounded-xl transition-colors flex items-center gap-1.5 text-xs font-semibold"
-            title="Return to System Launcher"
-          >
-            <ArrowLeft className="w-4 h-4" />
-            <span>All Systems</span>
-          </button>
-          <div className="h-6 w-px bg-slate-200 hidden sm:block" />
-          <div className="flex items-center gap-2">
-            <div className="p-2 bg-blue-50 text-blue-600 rounded-xl border border-blue-100">
-              <CalendarCheck className="w-5 h-5" />
-            </div>
-            <div>
-              <h2 className="text-base font-bold text-slate-900 tracking-tight leading-tight">
-                Daily Attendance & Roll-Call Registers
-              </h2>
-              <span className="text-[11px] text-slate-400 font-medium">
-                Classroom roll-call, section attendance marking, audit corrections, and student history
-              </span>
-            </div>
+        <div className="flex items-center gap-2">
+          <div className="p-2 bg-blue-50 text-blue-600 rounded-xl border border-blue-100">
+            <CalendarCheck className="w-5 h-5" />
+          </div>
+          <div>
+            <h2 className="text-base font-bold text-slate-900 tracking-tight leading-tight">
+              Daily Attendance & Roll-Call Registers
+            </h2>
+            <span className="text-[11px] text-slate-400 font-medium">
+              Classroom roll-call, section attendance marking, audit corrections, and student history
+            </span>
           </div>
         </div>
 

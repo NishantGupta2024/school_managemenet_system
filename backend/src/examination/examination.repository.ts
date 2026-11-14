@@ -78,6 +78,8 @@ export class ExaminationPrismaRepository implements IExaminationRepository {
       endWindowAt: row.endWindowAt ? new Date(row.endWindowAt) : null,
       shuffleQuestions: Boolean(row.shuffleQuestions),
       shuffleOptions: Boolean(row.shuffleOptions),
+      enableProctoring: Boolean(row.enableProctoring),
+      monitoringConfig: row.monitoringConfig ?? null,
       createdAt: new Date(row.createdAt),
       updatedAt: new Date(row.updatedAt),
     };
@@ -93,6 +95,10 @@ export class ExaminationPrismaRepository implements IExaminationRepository {
       startedAt: new Date(row.startedAt),
       deadlineAt: new Date(row.deadlineAt),
       submittedAt: row.submittedAt ? new Date(row.submittedAt) : null,
+      proctoringPassed: Boolean(row.proctoringPassed),
+      preflightData: row.preflightData ?? null,
+      flaggedForReview: Boolean(row.flaggedForReview),
+      studentExplanation: row.studentExplanation ?? null,
       createdAt: new Date(row.createdAt),
       updatedAt: new Date(row.updatedAt),
     };
@@ -254,11 +260,13 @@ export class ExaminationPrismaRepository implements IExaminationRepository {
         "id", "schoolId", "academicYearId", "gradeId", "sectionId", "teacherId", "chapterId",
         "title", "description", "subject", "mode", "status", "totalMarks", "passingMarks",
         "durationMinutes", "startWindowAt", "endWindowAt", "shuffleQuestions", "shuffleOptions",
+        "enableProctoring", "monitoringConfig",
         "createdAt", "updatedAt"
       ) VALUES (
         gen_random_uuid(), $1, $2, $3, $4, $5, $6,
         $7, $8, $9, $10::"AssessmentMode", 'DRAFT', $11, $12,
         $13, $14, $15, $16, $17,
+        $18, $19::jsonb,
         CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
       ) RETURNING *`,
       data.schoolId,
@@ -278,6 +286,8 @@ export class ExaminationPrismaRepository implements IExaminationRepository {
       data.endWindowAt,
       data.shuffleQuestions,
       data.shuffleOptions,
+      Boolean(data.enableProctoring),
+      data.monitoringConfig ? JSON.stringify(data.monitoringConfig) : null,
     );
     return this.mapAssessment(rows[0]);
   }
@@ -437,6 +447,14 @@ export class ExaminationPrismaRepository implements IExaminationRepository {
       if (data.shuffleOptions !== undefined) {
         params.push(data.shuffleOptions);
         updates.push(`"shuffleOptions" = $${params.length}`);
+      }
+      if (data.enableProctoring !== undefined) {
+        params.push(Boolean(data.enableProctoring));
+        updates.push(`"enableProctoring" = $${params.length}`);
+      }
+      if (data.monitoringConfig !== undefined) {
+        params.push(data.monitoringConfig ? JSON.stringify(data.monitoringConfig) : null);
+        updates.push(`"monitoringConfig" = $${params.length}::jsonb`);
       }
 
       const query = `UPDATE "assessments" SET ${updates.join(', ')} WHERE "schoolId" = $1 AND "id" = $2 RETURNING *`;

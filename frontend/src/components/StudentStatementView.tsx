@@ -491,7 +491,7 @@ export const StudentStatementView: React.FC = () => {
               </div>
             ) : (
               <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse text-xs">
+                <table className="w-full min-w-[850px] text-left border-collapse text-xs">
                   <thead>
                     <tr className="bg-slate-50/80 border-b border-slate-200/80 text-slate-600 font-semibold uppercase tracking-wider">
                       <th className="py-3 px-4">Cycle</th>
@@ -627,7 +627,7 @@ export const StudentStatementView: React.FC = () => {
             </div>
 
             <div className="mt-4 overflow-x-auto">
-              <table className="w-full text-left border-collapse text-xs">
+              <table className="w-full min-w-[550px] text-left border-collapse text-xs">
                 <thead>
                   <tr className="bg-slate-50 border-b border-slate-200 text-slate-600 font-semibold uppercase tracking-wider">
                     <th className="py-2.5 px-3">Fee Head Snapshot</th>

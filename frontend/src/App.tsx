@@ -50,7 +50,6 @@ import {
   CreditCard,
   Users,
   GraduationCap,
-  ArrowLeft,
   Lock,
   Bell,
 } from 'lucide-react';
@@ -182,35 +181,24 @@ export const FeeManagementWorkspace: React.FC = () => {
   return (
     <div className="space-y-6">
       {/* Module Workspace Navigation Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => navigate('/app')}
-            className="p-2 border border-slate-200 hover:bg-slate-50 text-slate-600 rounded-xl transition-colors flex items-center gap-1.5 text-xs font-semibold"
-            title="Return to System Launcher"
-          >
-            <ArrowLeft className="w-4 h-4" />
-            <span>All Systems</span>
-          </button>
-          <div className="h-6 w-px bg-slate-200 hidden sm:block" />
-          <div className="flex items-center gap-2">
-            <div className="p-2 bg-emerald-50 text-emerald-600 rounded-xl border border-emerald-100">
-              <CreditCard className="w-5 h-5" />
-            </div>
-            <div>
-              <h2 className="text-base font-bold text-slate-900 tracking-tight leading-tight">
-                Fee Management Workspace
-              </h2>
-              <span className="text-[11px] text-slate-400 font-medium">
-                Invoicing, allocations, payments, receipts, and financial statements
-              </span>
-            </div>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200 shadow-xs">
+        <div className="flex items-center gap-2 min-w-0 flex-1">
+          <div className="p-2 bg-emerald-50 text-emerald-600 rounded-xl border border-emerald-100 shrink-0">
+            <CreditCard className="w-5 h-5" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <h2 className="text-sm sm:text-base font-bold text-slate-900 tracking-tight leading-tight truncate">
+              Fee Management Workspace
+            </h2>
+            <span className="text-[10px] sm:text-[11px] text-slate-400 font-medium truncate block">
+              Invoicing, allocations, payments, receipts, and financial statements
+            </span>
           </div>
         </div>
 
         <button
           onClick={() => navigate('/app')}
-          className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 transition-colors self-end sm:self-auto"
+          className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 transition-colors self-end sm:self-auto shrink-0"
         >
           System Launcher →
         </button>
@@ -335,35 +323,24 @@ export const StudentManagementWorkspace: React.FC = () => {
   return (
     <div className="space-y-6">
       {/* Top Workspace Navigation Bar */}
-      <div className="flex items-center justify-between bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => navigate('/app')}
-            className="p-2 border border-slate-200 hover:bg-slate-50 text-slate-600 rounded-xl transition-colors flex items-center gap-1.5 text-xs font-semibold"
-            title="Return to System Launcher"
-          >
-            <ArrowLeft className="w-4 h-4" />
-            <span>All Systems</span>
-          </button>
-          <div className="h-6 w-px bg-slate-200 hidden sm:block" />
-          <div className="flex items-center gap-2">
-            <div className="p-2 bg-indigo-50 text-indigo-600 rounded-xl border border-indigo-100">
-              <Users className="w-5 h-5" />
-            </div>
-            <div>
-              <h2 className="text-base font-bold text-slate-900 tracking-tight leading-tight">
-                Student Management Workspace
-              </h2>
-              <span className="text-[11px] text-slate-400 font-medium">
-                Authoritative institutional directory, admissions, and profile statements
-              </span>
-            </div>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200 shadow-xs">
+        <div className="flex items-center gap-2 min-w-0 flex-1">
+          <div className="p-2 bg-indigo-50 text-indigo-600 rounded-xl border border-indigo-100 shrink-0">
+            <Users className="w-5 h-5" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <h2 className="text-sm sm:text-base font-bold text-slate-900 tracking-tight leading-tight truncate">
+              Student Management Workspace
+            </h2>
+            <span className="text-[10px] sm:text-[11px] text-slate-400 font-medium truncate block">
+              Authoritative institutional directory, admissions, and profile statements
+            </span>
           </div>
         </div>
 
         <button
           onClick={() => navigate('/app')}
-          className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 transition-colors"
+          className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 transition-colors self-end sm:self-auto shrink-0"
         >
           System Launcher →
         </button>
@@ -407,35 +384,24 @@ export const AcademicSetupWorkspace: React.FC = () => {
   return (
     <div className="space-y-6">
       {/* Top Workspace Navigation Bar */}
-      <div className="flex items-center justify-between bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => navigate('/app')}
-            className="p-2 border border-slate-200 hover:bg-slate-50 text-slate-600 rounded-xl transition-colors flex items-center gap-1.5 text-xs font-semibold"
-            title="Return to System Launcher"
-          >
-            <ArrowLeft className="w-4 h-4" />
-            <span>All Systems</span>
-          </button>
-          <div className="h-6 w-px bg-slate-200 hidden sm:block" />
-          <div className="flex items-center gap-2">
-            <div className="p-2 bg-purple-50 text-purple-600 rounded-xl border border-purple-100">
-              <GraduationCap className="w-5 h-5" />
-            </div>
-            <div>
-              <h2 className="text-base font-bold text-slate-900 tracking-tight leading-tight">
-                Academic Setup & Governance
-              </h2>
-              <span className="text-[11px] text-slate-400 font-medium">
-                Academic session lifecycles, grade levels, and section allocations
-              </span>
-            </div>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200 shadow-xs">
+        <div className="flex items-center gap-2 min-w-0 flex-1">
+          <div className="p-2 bg-purple-50 text-purple-600 rounded-xl border border-purple-100 shrink-0">
+            <GraduationCap className="w-5 h-5" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <h2 className="text-sm sm:text-base font-bold text-slate-900 tracking-tight leading-tight truncate">
+              Academic Setup & Governance
+            </h2>
+            <span className="text-[10px] sm:text-[11px] text-slate-400 font-medium truncate block">
+              Academic session lifecycles, grade levels, and section allocations
+            </span>
           </div>
         </div>
 
         <button
           onClick={() => navigate('/app')}
-          className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 transition-colors"
+          className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 transition-colors self-end sm:self-auto shrink-0"
         >
           System Launcher →
         </button>
@@ -478,35 +444,24 @@ export const UserManagementWorkspace: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => navigate('/app')}
-            className="p-2 border border-slate-200 hover:bg-slate-50 text-slate-600 rounded-xl transition-colors flex items-center gap-1.5 text-xs font-semibold"
-            title="Return to System Launcher"
-          >
-            <ArrowLeft className="w-4 h-4" />
-            <span>All Systems</span>
-          </button>
-          <div className="h-6 w-px bg-slate-200 hidden sm:block" />
-          <div className="flex items-center gap-2">
-            <div className="p-2 bg-indigo-50 text-indigo-600 rounded-xl border border-indigo-100">
-              <Lock className="w-5 h-5" />
-            </div>
-            <div>
-              <h2 className="text-base font-bold text-slate-900 tracking-tight leading-tight">
-                User Accounts & Access Management
-              </h2>
-              <span className="text-[11px] text-slate-400 font-medium">
-                Fee staff accounts, student portal credentials, and parent-student linkages
-              </span>
-            </div>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200 shadow-xs">
+        <div className="flex items-center gap-2 min-w-0 flex-1">
+          <div className="p-2 bg-indigo-50 text-indigo-600 rounded-xl border border-indigo-100 shrink-0">
+            <Lock className="w-5 h-5" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <h2 className="text-sm sm:text-base font-bold text-slate-900 tracking-tight leading-tight truncate">
+              User Accounts & Access Management
+            </h2>
+            <span className="text-[10px] sm:text-[11px] text-slate-400 font-medium truncate block">
+              Fee staff accounts, student portal credentials, and parent-student linkages
+            </span>
           </div>
         </div>
 
         <button
           onClick={() => navigate('/app')}
-          className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 transition-colors"
+          className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 transition-colors self-end sm:self-auto shrink-0"
         >
           System Launcher →
         </button>
@@ -549,35 +504,24 @@ export const NotificationManagementWorkspace: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => navigate('/app')}
-            className="p-2 border border-slate-200 hover:bg-slate-50 text-slate-600 rounded-xl transition-colors flex items-center gap-1.5 text-xs font-semibold"
-            title="Return to System Launcher"
-          >
-            <ArrowLeft className="w-4 h-4" />
-            <span>All Systems</span>
-          </button>
-          <div className="h-6 w-px bg-slate-200 hidden sm:block" />
-          <div className="flex items-center gap-2">
-            <div className="p-2 bg-amber-50 text-amber-600 rounded-xl border border-amber-100">
-              <Bell className="w-5 h-5" />
-            </div>
-            <div>
-              <h2 className="text-base font-bold text-slate-900 tracking-tight leading-tight">
-                Notifications & Communications
-              </h2>
-              <span className="text-[11px] text-slate-400 font-medium">
-                Automated email alerts, notification preferences, delivery logs, and channel status
-              </span>
-            </div>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200 shadow-xs">
+        <div className="flex items-center gap-2 min-w-0 flex-1">
+          <div className="p-2 bg-amber-50 text-amber-600 rounded-xl border border-amber-100 shrink-0">
+            <Bell className="w-5 h-5" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <h2 className="text-sm sm:text-base font-bold text-slate-900 tracking-tight leading-tight truncate">
+              Notifications & Communications
+            </h2>
+            <span className="text-[10px] sm:text-[11px] text-slate-400 font-medium truncate block">
+              Automated email alerts, notification preferences, delivery logs, and channel status
+            </span>
           </div>
         </div>
 
         <button
           onClick={() => navigate('/app')}
-          className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 transition-colors"
+          className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 transition-colors self-end sm:self-auto shrink-0"
         >
           System Launcher →
         </button>
@@ -617,35 +561,24 @@ export const PlatformAdminWorkspace: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => navigate('/app')}
-            className="p-2 border border-slate-200 hover:bg-slate-50 text-slate-600 rounded-xl transition-colors flex items-center gap-1.5 text-xs font-semibold"
-            title="Return to System Launcher"
-          >
-            <ArrowLeft className="w-4 h-4" />
-            <span>All Systems</span>
-          </button>
-          <div className="h-6 w-px bg-slate-200 hidden sm:block" />
-          <div className="flex items-center gap-2">
-            <div className="p-2 bg-amber-50 text-amber-600 rounded-xl border border-amber-100">
-              <Building2 className="w-5 h-5" />
-            </div>
-            <div>
-              <h2 className="text-base font-bold text-slate-900 tracking-tight leading-tight">
-                Platform Administration
-              </h2>
-              <span className="text-[11px] text-slate-400 font-medium">
-                Global school tenant directory, school onboarding, and system health
-              </span>
-            </div>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200 shadow-xs">
+        <div className="flex items-center gap-2 min-w-0 flex-1">
+          <div className="p-2 bg-amber-50 text-amber-600 rounded-xl border border-amber-100 shrink-0">
+            <Building2 className="w-5 h-5" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <h2 className="text-sm sm:text-base font-bold text-slate-900 tracking-tight leading-tight truncate">
+              Platform Administration
+            </h2>
+            <span className="text-[10px] sm:text-[11px] text-slate-400 font-medium truncate block">
+              Global school tenant directory, school onboarding, and system health
+            </span>
           </div>
         </div>
 
         <button
           onClick={() => navigate('/app')}
-          className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 transition-colors"
+          className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 transition-colors self-end sm:self-auto shrink-0"
         >
           System Launcher →
         </button>
@@ -692,35 +625,24 @@ export const TeacherManagementWorkspace: React.FC = () => {
   return (
     <div className="space-y-6">
       {/* Top Workspace Navigation Bar */}
-      <div className="flex items-center justify-between bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => navigate('/app')}
-            className="p-2 border border-slate-200 hover:bg-slate-50 text-slate-600 rounded-xl transition-colors flex items-center gap-1.5 text-xs font-semibold"
-            title="Return to System Launcher"
-          >
-            <ArrowLeft className="w-4 h-4" />
-            <span>All Systems</span>
-          </button>
-          <div className="h-6 w-px bg-slate-200 hidden sm:block" />
-          <div className="flex items-center gap-2">
-            <div className="p-2 bg-teal-50 text-teal-600 rounded-xl border border-teal-100">
-              <GraduationCap className="w-5 h-5" />
-            </div>
-            <div>
-              <h2 className="text-base font-bold text-slate-900 tracking-tight leading-tight">
-                Teacher & Staff Management
-              </h2>
-              <span className="text-[11px] text-slate-400 font-medium">
-                Faculty directory, classroom assignments, designations, and portal provisioning
-              </span>
-            </div>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200 shadow-xs">
+        <div className="flex items-center gap-2 min-w-0 flex-1">
+          <div className="p-2 bg-teal-50 text-teal-600 rounded-xl border border-teal-100 shrink-0">
+            <GraduationCap className="w-5 h-5" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <h2 className="text-sm sm:text-base font-bold text-slate-900 tracking-tight leading-tight truncate">
+              Teacher & Staff Management
+            </h2>
+            <span className="text-[10px] sm:text-[11px] text-slate-400 font-medium truncate block">
+              Faculty directory, classroom assignments, designations, and portal provisioning
+            </span>
           </div>
         </div>
 
         <button
           onClick={() => navigate('/app')}
-          className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 transition-colors"
+          className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 transition-colors self-end sm:self-auto shrink-0"
         >
           System Launcher →
         </button>
@@ -745,7 +667,7 @@ export const ERPWorkspaceShell: React.FC = () => {
     <div className="min-h-screen bg-slate-50 flex flex-col font-sans">
       <Header />
 
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-6 sm:py-8">
+      <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 py-4 sm:py-8 overflow-x-hidden">
         <div key={tenantKey} className="w-full">
           <Routes>
             <Route index element={<MainLauncherDashboard />} />

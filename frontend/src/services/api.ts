@@ -46,6 +46,11 @@ api.interceptors.request.use((config) => {
     config.headers.Authorization = `Bearer ${token}`;
   }
 
+  // Allow browser to generate multipart boundary automatically for FormData
+  if (config.data instanceof FormData) {
+    delete config.headers['Content-Type'];
+  }
+
   // Determine if request is public (login, health)
   const isPublicEndpoint =
     config.url?.includes('/auth/login') || config.url?.includes('/health');
@@ -1219,11 +1224,7 @@ export const excelImportsApi = {
     formData.append('type', type);
     formData.append('academicYearId', academicYearId);
 
-    const res = await api.post<ImportPreviewResult>('/excel-imports/preview', formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data',
-      },
-    });
+    const res = await api.post<ImportPreviewResult>('/excel-imports/preview', formData);
     return res.data;
   },
   confirm: async (data: {

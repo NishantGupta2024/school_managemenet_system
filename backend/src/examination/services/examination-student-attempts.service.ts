@@ -7,6 +7,7 @@ import {
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
+import * as crypto from 'crypto';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
   EXAMINATION_REPOSITORY,
@@ -18,6 +19,7 @@ import {
   AssessmentMode,
   AssessmentStatus,
   AttemptStatus,
+  getConfiguredViolationTypes,
   ParentAssessmentHistoryItemDto,
   ParentStudentAssessmentHistoryResponseDto,
   QuestionImageArtifactRecord,
@@ -27,13 +29,18 @@ import {
   StudentResultViewDto,
   StudentSanitizedQuestionDto,
   SubmitAttemptResponseDto,
+  ViolationEventType,
 } from '../types';
 import { SaveAnswerDto } from '../dto/save-answer.dto';
+import { RecordViolationEventDto } from '../dto/record-violation-event.dto';
+import { PreflightCompleteDto, StudentExplanationDto } from '../dto/preflight-check.dto';
 import { ExaminationProgressionService } from './examination-progression.service';
 
 @Injectable()
 export class ExaminationStudentAttemptsService {
   private readonly logger = new Logger(ExaminationStudentAttemptsService.name);
+  private readonly lastViolationTimestamps = new Map<string, number>();
+  private readonly downloadSampleBuffer: Buffer = crypto.randomBytes(250 * 1024);
 
   constructor(
     private readonly prisma: PrismaService,
@@ -41,6 +48,10 @@ export class ExaminationStudentAttemptsService {
     private readonly examRepo: IExaminationRepository,
     private readonly progressionService: ExaminationProgressionService,
   ) {}
+
+  getDownloadSampleBuffer(): Buffer {
+    return this.downloadSampleBuffer;
+  }
 
   private async resolveActiveStudent(schoolId: string, userId: string) {
     const student = await this.prisma.student.findFirst({
@@ -58,6 +69,27 @@ export class ExaminationStudentAttemptsService {
     }
 
     return student;
+  }
+
+  /**
+   * Helper to count distinct persisted, non-dismissed misconduct violation events of configured types.
+   */
+  async countActiveMisconductViolations(
+    schoolId: string,
+    attemptId: string,
+    monitoringConfig: any,
+  ): Promise<number> {
+    const configuredTypes = getConfiguredViolationTypes(monitoringConfig);
+    if (configuredTypes.length === 0) return 0;
+
+    return this.prisma.assessmentViolationEvent.count({
+      where: {
+        schoolId,
+        attemptId,
+        dismissed: false,
+        eventType: { in: configuredTypes as any },
+      },
+    });
   }
 
   private async buildAttemptDetail(
@@ -106,6 +138,26 @@ export class ExaminationStudentAttemptsService {
       );
     }
 
+    let isLocked = false;
+    let activeWarningsCount = 0;
+    const monitoringConfig = (assessment.monitoringConfig as any) || {};
+    const maxWarnings = monitoringConfig.maxWarnings ?? 3;
+
+    if (assessment.enableProctoring) {
+      activeWarningsCount = await this.countActiveMisconductViolations(
+        schoolId,
+        attempt.id,
+        monitoringConfig,
+      );
+
+      if (
+        activeWarningsCount >= maxWarnings &&
+        attempt.status === AttemptStatus.IN_PROGRESS
+      ) {
+        isLocked = true;
+      }
+    }
+
     return {
       id: attempt.id,
       assessmentId: assessment.id,
@@ -115,6 +167,15 @@ export class ExaminationStudentAttemptsService {
       deadlineAt: attempt.deadlineAt,
       remainingSeconds,
       submittedAt: attempt.submittedAt,
+      enableProctoring: assessment.enableProctoring ?? false,
+      monitoringConfig: assessment.monitoringConfig ?? null,
+      proctoringPassed: (attempt as any).proctoringPassed ?? false,
+      preflightData: (attempt as any).preflightData ?? null,
+      flaggedForReview: (attempt as any).flaggedForReview ?? false,
+      studentExplanation: (attempt as any).studentExplanation ?? null,
+      isLocked,
+      activeWarningsCount,
+      maxWarnings,
       questions: sanitizedQuestions,
       answers: answerMap,
     };
@@ -167,9 +228,12 @@ export class ExaminationStudentAttemptsService {
         durationMinutes: assessment.durationMinutes,
         startWindowAt: assessment.startWindowAt,
         endWindowAt: assessment.endWindowAt,
+        enableProctoring: assessment.enableProctoring ?? false,
+        monitoringConfig: assessment.monitoringConfig ?? null,
         hasAttempt: !!attempt,
         attemptStatus: attempt ? attempt.status : null,
         attemptId: attempt ? attempt.id : null,
+        proctoringPassed: (attempt as any)?.proctoringPassed ?? false,
       });
     }
 
@@ -359,6 +423,21 @@ export class ExaminationStudentAttemptsService {
       throw new BadRequestException(
         'Assessment attempt has expired and is now timed out',
       );
+    }
+
+    if (assessment.enableProctoring) {
+      const monitoringConfig = (assessment.monitoringConfig as any) || {};
+      const maxAllowed = monitoringConfig.maxWarnings ?? 3;
+      const activeMisconductViolations = await this.countActiveMisconductViolations(
+        schoolId,
+        attempt.id,
+        monitoringConfig,
+      );
+      if (activeMisconductViolations >= maxAllowed) {
+        throw new ForbiddenException(
+          `Assessment attempt is locked due to reaching the integrity warning limit (${activeMisconductViolations}/${maxAllowed}). Further answer changes are disabled. Please contact your teacher.`,
+        );
+      }
     }
 
     const question = await this.examRepo.findQuestionById(
@@ -894,5 +973,166 @@ export class ExaminationStudentAttemptsService {
     }
 
     return { reconciledCount };
+  }
+
+  /**
+   * Complete student preflight readiness checks before or upon entering exam.
+   */
+  async completePreflightCheck(
+    schoolId: string,
+    attemptId: string,
+    dto: PreflightCompleteDto,
+    user: any,
+  ) {
+    const student = await this.resolveActiveStudent(schoolId, user.id);
+    const attempt = await this.prisma.assessmentAttempt.findFirst({
+      where: { schoolId, id: attemptId, studentId: student.id },
+    });
+
+    if (!attempt) {
+      throw new NotFoundException('Assessment attempt not found');
+    }
+
+    if (attempt.status !== AttemptStatus.IN_PROGRESS) {
+      throw new BadRequestException('Cannot complete preflight check on finalized attempt');
+    }
+
+    const updated = await this.prisma.assessmentAttempt.update({
+      where: { id: attempt.id },
+      data: {
+        proctoringPassed: true,
+        preflightData: dto.preflightData ? (dto.preflightData as any) : undefined,
+      },
+    });
+
+    return {
+      success: true,
+      proctoringPassed: updated.proctoringPassed,
+      preflightData: updated.preflightData,
+    };
+  }
+
+  /**
+   * Record a proctoring violation event (fullscreen exit, tab blur, etc.)
+   */
+  async recordViolationEvent(
+    schoolId: string,
+    attemptId: string,
+    dto: RecordViolationEventDto,
+    user: any,
+  ) {
+    const student = await this.resolveActiveStudent(schoolId, user.id);
+    const attempt = await this.prisma.assessmentAttempt.findFirst({
+      where: { schoolId, id: attemptId, studentId: student.id },
+      include: { assessment: true },
+    });
+
+    if (!attempt) {
+      throw new NotFoundException('Assessment attempt not found');
+    }
+
+    if (attempt.status !== AttemptStatus.IN_PROGRESS) {
+      throw new BadRequestException('Cannot log event on finalized attempt');
+    }
+
+    // Rate-limiting check: debounce same event type within 2 seconds
+    const throttleKey = `${attemptId}:${dto.eventType}`;
+    const nowMs = Date.now();
+    const lastTimestamp = this.lastViolationTimestamps.get(throttleKey) || 0;
+    if (nowMs - lastTimestamp < 2000) {
+      return {
+        recorded: false,
+        throttled: true,
+        message: 'Throttled duplicate event',
+      };
+    }
+    this.lastViolationTimestamps.set(throttleKey, nowMs);
+
+    // Save event
+    const event = await this.prisma.assessmentViolationEvent.create({
+      data: {
+        schoolId,
+        assessmentId: attempt.assessmentId,
+        attemptId: attempt.id,
+        studentId: student.id,
+        eventType: dto.eventType,
+        durationMs: dto.durationMs ?? null,
+        metadata: dto.metadata ? (dto.metadata as any) : undefined,
+      },
+    });
+
+    // Check violation count against assessment threshold
+    const totalViolations = await this.prisma.assessmentViolationEvent.count({
+      where: { schoolId, attemptId: attempt.id, dismissed: false },
+    });
+
+    const monitoringConfig = (attempt.assessment.monitoringConfig as any) || {};
+    const maxAllowed = monitoringConfig.maxWarnings ?? 3;
+
+    // Count distinct persisted non-dismissed misconduct violation events of configured types
+    const activeMisconductViolations = await this.countActiveMisconductViolations(
+      schoolId,
+      attempt.id,
+      monitoringConfig,
+    );
+
+    // Check violation count against configured misconduct threshold
+    const isLocked =
+      attempt.assessment.enableProctoring &&
+      activeMisconductViolations >= maxAllowed;
+
+    // Flag for teacher review on lock or on object-detection alert (advisory for review without hard lock)
+    let flaggedForReview = attempt.flaggedForReview;
+    const shouldFlag = isLocked || event.eventType === ViolationEventType.OBJECT_DETECTED;
+    if (shouldFlag && !attempt.flaggedForReview) {
+      await this.prisma.assessmentAttempt.update({
+        where: { id: attempt.id },
+        data: { flaggedForReview: true },
+      });
+      flaggedForReview = true;
+    }
+
+    return {
+      recorded: true,
+      eventId: event.id,
+      eventType: event.eventType,
+      totalViolations,
+      activeMisconductViolations,
+      maxAllowed,
+      flaggedForReview,
+      isLocked,
+    };
+  }
+
+  /**
+   * Record student explanation for flagged attempt.
+   */
+  async recordStudentExplanation(
+    schoolId: string,
+    attemptId: string,
+    dto: StudentExplanationDto,
+    user: any,
+  ) {
+    const student = await this.resolveActiveStudent(schoolId, user.id);
+    const attempt = await this.prisma.assessmentAttempt.findFirst({
+      where: { schoolId, id: attemptId, studentId: student.id },
+    });
+
+    if (!attempt) {
+      throw new NotFoundException('Assessment attempt not found');
+    }
+
+    const updated = await this.prisma.assessmentAttempt.update({
+      where: { id: attempt.id },
+      data: {
+        studentExplanation: dto.explanation.trim(),
+      },
+    });
+
+    return {
+      success: true,
+      attemptId: updated.id,
+      studentExplanation: updated.studentExplanation,
+    };
   }
 }

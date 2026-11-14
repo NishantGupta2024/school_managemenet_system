@@ -18,6 +18,7 @@ import {
   Award,
   Lock,
   Trophy,
+  ShieldAlert,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import {
@@ -39,6 +40,8 @@ import {
 } from '../services/api';
 import { AssessmentQuestionManagementView } from './AssessmentQuestionManagementView';
 import { ExaminationLeaderboardModal } from './ExaminationLeaderboardModal';
+import { AssessmentAttemptsModal } from './AssessmentAttemptsModal';
+import { AssessmentIntegrityAuditModal } from './AssessmentIntegrityAuditModal';
 import { downloadQuestionTemplate } from '../utils/questionTemplateGenerator';
 
 interface TeacherExaminationViewProps {
@@ -129,6 +132,12 @@ export const TeacherExaminationView: React.FC<TeacherExaminationViewProps> = ({
     endWindowAt: string;
     shuffleQuestions: boolean;
     shuffleOptions: boolean;
+    enableProctoring: boolean;
+    requireFullscreen: boolean;
+    detectTabSwitch: boolean;
+    requireWebcam: boolean;
+    requireMic: boolean;
+    maxWarnings: number;
   }>({
     academicYearId: '',
     gradeId: '',
@@ -145,7 +154,17 @@ export const TeacherExaminationView: React.FC<TeacherExaminationViewProps> = ({
     endWindowAt: '',
     shuffleQuestions: false,
     shuffleOptions: false,
+    enableProctoring: false,
+    requireFullscreen: true,
+    detectTabSwitch: true,
+    requireWebcam: false,
+    requireMic: false,
+    maxWarnings: 3,
   });
+
+  const [attemptsModalAssessment, setAttemptsModalAssessment] = useState<AssessmentDraft | null>(null);
+  const [integrityAuditAssessment, setIntegrityAuditAssessment] = useState<AssessmentDraft | null>(null);
+  const [integrityAuditAttemptId, setIntegrityAuditAttemptId] = useState<string | null>(null);
 
   // ---------------------------------------------------------------------------
   // Data Fetching
@@ -502,10 +521,15 @@ export const TeacherExaminationView: React.FC<TeacherExaminationViewProps> = ({
     );
     const firstChapter = matchingChapters[0] || null;
 
+    // When teacher cannot teach grade-wide, auto-select the first assigned section
+    const initialSectionId = canTeachGradeWide
+      ? ''
+      : (draftGradeSections[0]?.id || activeTeacherAssignments.find(a => a.gradeId === initialGradeId)?.sectionId || '');
+
     setDraftForm({
       academicYearId: currentAcademicYear?.id || '',
       gradeId: initialGradeId,
-      sectionId: '',
+      sectionId: initialSectionId,
       chapterId: firstChapter ? firstChapter.id : '',
       title: firstChapter ? firstChapter.title : '',
       description: '',
@@ -518,6 +542,12 @@ export const TeacherExaminationView: React.FC<TeacherExaminationViewProps> = ({
       endWindowAt: '',
       shuffleQuestions: false,
       shuffleOptions: false,
+      enableProctoring: false,
+      requireFullscreen: true,
+      detectTabSwitch: true,
+      requireWebcam: false,
+      requireMic: false,
+      maxWarnings: 3,
     });
     setIsCreateDraftOpen(true);
   };
@@ -544,6 +574,12 @@ export const TeacherExaminationView: React.FC<TeacherExaminationViewProps> = ({
       endWindowAt: draft.endWindowAt ? new Date(draft.endWindowAt).toISOString().slice(0, 16) : '',
       shuffleQuestions: draft.shuffleQuestions,
       shuffleOptions: draft.shuffleOptions,
+      enableProctoring: draft.enableProctoring ?? false,
+      requireFullscreen: draft.monitoringConfig?.requireFullscreen ?? true,
+      detectTabSwitch: draft.monitoringConfig?.detectTabSwitch ?? true,
+      requireWebcam: draft.monitoringConfig?.requireWebcam ?? false,
+      requireMic: draft.monitoringConfig?.requireMic ?? false,
+      maxWarnings: draft.monitoringConfig?.maxWarnings ?? 3,
     });
     setIsCreateDraftOpen(true);
   };
@@ -618,6 +654,14 @@ export const TeacherExaminationView: React.FC<TeacherExaminationViewProps> = ({
           endWindowAt: draftForm.endWindowAt ? new Date(draftForm.endWindowAt).toISOString() : null,
           shuffleQuestions: Boolean(draftForm.shuffleQuestions),
           shuffleOptions: Boolean(draftForm.shuffleOptions),
+          enableProctoring: Boolean(draftForm.enableProctoring),
+          monitoringConfig: {
+            requireFullscreen: Boolean(draftForm.requireFullscreen),
+            detectTabSwitch: Boolean(draftForm.detectTabSwitch),
+            requireWebcam: Boolean(draftForm.requireWebcam),
+            requireMic: Boolean(draftForm.requireMic),
+            maxWarnings: Number(draftForm.maxWarnings) || 3,
+          },
         };
 
         const updated = await examinationApi.updateDraft(editingDraft.id, updateDto);
@@ -642,6 +686,14 @@ export const TeacherExaminationView: React.FC<TeacherExaminationViewProps> = ({
           endWindowAt: draftForm.endWindowAt ? new Date(draftForm.endWindowAt).toISOString() : null,
           shuffleQuestions: Boolean(draftForm.shuffleQuestions),
           shuffleOptions: Boolean(draftForm.shuffleOptions),
+          enableProctoring: Boolean(draftForm.enableProctoring),
+          monitoringConfig: {
+            requireFullscreen: Boolean(draftForm.requireFullscreen),
+            detectTabSwitch: Boolean(draftForm.detectTabSwitch),
+            requireWebcam: Boolean(draftForm.requireWebcam),
+            requireMic: Boolean(draftForm.requireMic),
+            maxWarnings: Number(draftForm.maxWarnings) || 3,
+          },
         };
 
         const created = await examinationApi.createDraft(createDto);
@@ -1098,6 +1150,11 @@ export const TeacherExaminationView: React.FC<TeacherExaminationViewProps> = ({
                         >
                           {a.mode === AssessmentMode.LIVE_EXAM ? 'Live Exam' : 'Normal Quiz'}
                         </span>
+                        {a.enableProctoring && (
+                          <span className="px-2 py-0.5 rounded-lg border font-semibold bg-indigo-50 text-indigo-700 border-indigo-200 flex items-center gap-1">
+                            <ShieldAlert className="w-3 h-3 text-indigo-600" /> Monitored
+                          </span>
+                        )}
                       </div>
 
                       {/* Parameters Grid */}
@@ -1213,19 +1270,24 @@ export const TeacherExaminationView: React.FC<TeacherExaminationViewProps> = ({
                           <button
                             type="button"
                             onClick={() => setLifecycleModal({ type: 'release', assessment: a })}
-                            disabled={
-                              actionLoadingId === a.id ||
-                              (a.endWindowAt ? new Date().getTime() < new Date(a.endWindowAt).getTime() : false)
-                            }
-                            className="px-2.5 py-1 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white disabled:opacity-50 disabled:cursor-not-allowed rounded-lg transition-colors flex items-center gap-1 shadow-2xs"
-                            title={
-                              a.endWindowAt && new Date().getTime() < new Date(a.endWindowAt).getTime()
-                                ? `Results can only be released after the end window (${new Date(a.endWindowAt).toLocaleString()})`
-                                : 'Release Results to Students and Parents'
-                            }
+                            disabled={actionLoadingId === a.id}
+                            className="px-2.5 py-1 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white disabled:opacity-50 rounded-lg transition-colors flex items-center gap-1 shadow-2xs"
+                            title="Release Results to Students and Parents"
                           >
                             <Award className="w-3.5 h-3.5" />
                             <span>{actionLoadingId === a.id ? 'Releasing...' : 'Release Results'}</span>
+                          </button>
+                        )}
+
+                        {!isDraft && (
+                          <button
+                            type="button"
+                            onClick={() => setAttemptsModalAssessment(a)}
+                            className="px-2.5 py-1 text-xs font-semibold bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-lg transition-colors flex items-center gap-1 shadow-2xs"
+                            title="View Student Attempts & Integrity Audit"
+                          >
+                            <ShieldAlert className="w-3.5 h-3.5 text-indigo-600" />
+                            <span>Integrity Audit</span>
                           </button>
                         )}
 
@@ -1576,6 +1638,13 @@ export const TeacherExaminationView: React.FC<TeacherExaminationViewProps> = ({
                       const nextGradeId = e.target.value;
                       const subjs = assignedSubjectsForGrade(nextGradeId);
                       const nextSubj = subjs[0] || '';
+                      const nextSections = grades.find((g) => g.id === nextGradeId)?.sections || [];
+                      const nextAssignedSections = isTeacher
+                        ? nextSections.filter(s => activeTeacherAssignments.some(a => a.gradeId === nextGradeId && a.sectionId === s.id))
+                        : nextSections;
+                      const nextCanGradeWide = !isTeacher || (nextSections.length > 0 && nextSections.every(s => nextAssignedSections.some(as => as.id === s.id)));
+                      const nextSectionId = nextCanGradeWide ? '' : (nextAssignedSections[0]?.id || '');
+
                       const nextChapters = chapters.filter(
                         (c) => c.gradeId === nextGradeId && (!nextSubj || c.subject.toLowerCase() === nextSubj.toLowerCase()),
                       );
@@ -1583,7 +1652,7 @@ export const TeacherExaminationView: React.FC<TeacherExaminationViewProps> = ({
                       setDraftForm({
                         ...draftForm,
                         gradeId: nextGradeId,
-                        sectionId: '',
+                        sectionId: nextSectionId,
                         subject: nextSubj,
                         chapterId: firstCh ? firstCh.id : '',
                         title: firstCh ? firstCh.title : '',
@@ -1842,6 +1911,78 @@ export const TeacherExaminationView: React.FC<TeacherExaminationViewProps> = ({
                 </label>
               </div>
 
+              {/* Proctoring & Integrity Checks */}
+              {import.meta.env.VITE_ENABLE_EXAM_PROCTORING === 'true' && (
+                <div className="p-3 bg-indigo-50/50 border border-indigo-100 rounded-xl space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="flex items-center gap-2 cursor-pointer font-bold text-xs text-indigo-950">
+                      <input
+                        type="checkbox"
+                        checked={draftForm.enableProctoring}
+                        onChange={(e) => setDraftForm({ ...draftForm, enableProctoring: e.target.checked })}
+                        className="w-4 h-4 text-indigo-600 rounded-md border-indigo-300 focus:ring-indigo-500"
+                      />
+                      <span>Enable Exam Readiness & Integrity Monitoring</span>
+                    </label>
+                    <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 bg-indigo-100 text-indigo-700 rounded-full">
+                      Safe & Local
+                    </span>
+                  </div>
+
+                  {draftForm.enableProctoring && (
+                    <div className="pt-2 border-t border-indigo-100/60 grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+                      <label className="flex items-center gap-2 cursor-pointer text-slate-700">
+                        <input
+                          type="checkbox"
+                          checked={draftForm.requireFullscreen}
+                          onChange={(e) => setDraftForm({ ...draftForm, requireFullscreen: e.target.checked })}
+                          className="w-3.5 h-3.5 text-indigo-600 rounded border-slate-300"
+                        />
+                        <span>Require Fullscreen</span>
+                      </label>
+                      <label className="flex items-center gap-2 cursor-pointer text-slate-700">
+                        <input
+                          type="checkbox"
+                          checked={draftForm.detectTabSwitch}
+                          onChange={(e) => setDraftForm({ ...draftForm, detectTabSwitch: e.target.checked })}
+                          className="w-3.5 h-3.5 text-indigo-600 rounded border-slate-300"
+                        />
+                        <span>Detect Tab Switches</span>
+                      </label>
+                      <label className="flex items-center gap-2 cursor-pointer text-slate-700">
+                        <input
+                          type="checkbox"
+                          checked={draftForm.requireWebcam}
+                          onChange={(e) => setDraftForm({ ...draftForm, requireWebcam: e.target.checked })}
+                          className="w-3.5 h-3.5 text-indigo-600 rounded border-slate-300"
+                        />
+                        <span>Require Webcam (Pilot)</span>
+                      </label>
+                      <label className="flex items-center gap-2 cursor-pointer text-slate-700">
+                        <input
+                          type="checkbox"
+                          checked={draftForm.requireMic}
+                          onChange={(e) => setDraftForm({ ...draftForm, requireMic: e.target.checked })}
+                          className="w-3.5 h-3.5 text-indigo-600 rounded border-slate-300"
+                        />
+                        <span>Require Microphone (Pilot)</span>
+                      </label>
+                      <div className="flex items-center gap-2">
+                        <label className="text-slate-600 font-medium text-xs whitespace-nowrap">Max Warnings:</label>
+                        <input
+                          type="number"
+                          min="1"
+                          max="10"
+                          value={draftForm.maxWarnings}
+                          onChange={(e) => setDraftForm({ ...draftForm, maxWarnings: Number(e.target.value) || 3 })}
+                          className="w-16 px-2 py-1 text-xs bg-white border border-indigo-200 rounded-lg text-center font-mono"
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Description */}
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">Instructions / Description</label>
@@ -2030,6 +2171,22 @@ export const TeacherExaminationView: React.FC<TeacherExaminationViewProps> = ({
                 </div>
               )}
 
+              {viewingDraft.enableProctoring && (
+                <div className="p-3 bg-indigo-50/60 rounded-xl border border-indigo-100 flex items-start gap-2 text-xs">
+                  <ShieldAlert className="w-4 h-4 text-indigo-600 shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-bold text-indigo-950 block">Integrity & Proctoring Configured</span>
+                    <span className="text-slate-600">
+                      Fullscreen required: {viewingDraft.monitoringConfig?.requireFullscreen !== false ? 'Yes' : 'No'} •
+                      Tab switch detection: {viewingDraft.monitoringConfig?.detectTabSwitch !== false ? 'Yes' : 'No'} •
+                      Webcam required: {viewingDraft.monitoringConfig?.requireWebcam ? 'Yes (Pilot)' : 'No'} •
+                      Microphone required: {viewingDraft.monitoringConfig?.requireMic ? 'Yes (Pilot)' : 'No'} •
+                      Max warnings: {viewingDraft.monitoringConfig?.maxWarnings || 3}
+                    </span>
+                  </div>
+                </div>
+              )}
+
               {viewingDraft.description && (
                 <div>
                   <span className="font-bold text-slate-700 block mb-1">Instructions / Description</span>
@@ -2191,6 +2348,29 @@ export const TeacherExaminationView: React.FC<TeacherExaminationViewProps> = ({
             </div>
           </div>
         </div>
+      )}
+      {/* Attempts & Integrity Audit Modal */}
+      {attemptsModalAssessment && (
+        <AssessmentAttemptsModal
+          assessment={attemptsModalAssessment}
+          onClose={() => setAttemptsModalAssessment(null)}
+          onAuditAttempt={(attemptId) => {
+            setIntegrityAuditAssessment(attemptsModalAssessment);
+            setIntegrityAuditAttemptId(attemptId);
+          }}
+        />
+      )}
+
+      {/* Integrity Audit Modal */}
+      {integrityAuditAssessment && integrityAuditAttemptId && (
+        <AssessmentIntegrityAuditModal
+          assessment={integrityAuditAssessment}
+          attemptId={integrityAuditAttemptId}
+          onClose={() => {
+            setIntegrityAuditAssessment(null);
+            setIntegrityAuditAttemptId(null);
+          }}
+        />
       )}
     </div>
   );

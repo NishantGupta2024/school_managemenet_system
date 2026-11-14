@@ -18,6 +18,7 @@ import {
   ChapterProgressionSummaryDto,
   ProgressionAssessmentStatus,
   StudentAssessmentProgressionRecord,
+  StudentChapterOptionDto,
 } from '../types';
 
 @Injectable()
@@ -281,6 +282,28 @@ export class ExaminationProgressionService {
       configuredModes,
       assessments: items,
     };
+  }
+
+  /**
+   * Lists curriculum chapters available to the authenticated student,
+   * securely scoped to the student's school, grade, and academic year.
+   */
+  async listChaptersForStudent(
+    schoolId: string,
+    user: any,
+  ): Promise<StudentChapterOptionDto[]> {
+    const student = await this.resolveActiveStudent(schoolId, user.id);
+    const chapters = await this.examRepo.findChapters(schoolId, {
+      gradeId: student.gradeId,
+      academicYearId: student.academicYearId,
+    });
+    return chapters.map((c) => ({
+      id: c.id,
+      chapterCode: c.chapterCode,
+      title: c.title,
+      subject: c.subject,
+      orderIndex: c.orderIndex,
+    }));
   }
 
   /**

@@ -2965,7 +2965,7 @@ export const PaymentsView: React.FC = () => {
               </div>
             ) : (
               <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse text-xs">
+                <table className="w-full min-w-[720px] text-left border-collapse text-xs">
                   <thead>
                     <tr className="bg-slate-50/80 border-b border-slate-200/80 text-slate-600 font-semibold uppercase tracking-wider">
                       <th className="py-3 px-3 w-10 text-center">
@@ -3395,7 +3395,7 @@ export const PaymentsView: React.FC = () => {
 
               {/* Line Item Allocations */}
               <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse text-xs">
+                <table className="w-full min-w-[720px] text-left border-collapse text-xs">
                   <thead>
                     <tr className="bg-slate-50 border-y border-slate-200 text-slate-600 font-semibold uppercase">
                       <th className="py-2 px-3">Item / Fee Head</th>

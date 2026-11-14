@@ -517,7 +517,7 @@ export const StudentAllocationsView: React.FC = () => {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm text-slate-600">
+            <table className="w-full min-w-[700px] text-left text-sm text-slate-600">
               <thead className="bg-slate-50 border-b border-slate-200 text-xs font-semibold text-slate-700 uppercase">
                 <tr>
                   <th className="py-3 px-4">Student</th>
@@ -902,8 +902,8 @@ export const StudentAllocationsView: React.FC = () => {
                   </div>
                 </div>
 
-                <div className="border border-slate-200 rounded-xl overflow-hidden max-h-60 overflow-y-auto">
-                  <table className="w-full text-left text-xs">
+                <div className="border border-slate-200 rounded-xl overflow-x-auto max-h-60 overflow-y-auto">
+                  <table className="w-full min-w-[380px] text-left text-xs">
                     <thead className="bg-slate-50 text-slate-600 font-semibold border-b border-slate-200 sticky top-0">
                       <tr>
                         <th className="p-2.5">Student</th>
@@ -1038,13 +1038,13 @@ export const StudentAllocationsView: React.FC = () => {
                     </button>
                   </div>
 
-                  <div className="border border-slate-200 rounded-xl overflow-hidden max-h-52 overflow-y-auto">
+                  <div className="border border-slate-200 rounded-xl overflow-x-auto max-h-52 overflow-y-auto">
                     {bulkGradeStudents.length === 0 ? (
                       <p className="text-xs text-slate-500 p-4 text-center">
                         No students enrolled in this grade.
                       </p>
                     ) : (
-                      <table className="w-full text-left text-xs">
+                      <table className="w-full min-w-[420px] text-left text-xs">
                         <thead className="bg-slate-50 text-slate-600 font-semibold border-b border-slate-200 sticky top-0">
                           <tr>
                             <th className="p-2.5 w-10">Select</th>

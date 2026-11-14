@@ -321,11 +321,11 @@ describe('Unified School ERP: Public Website & System Launcher Navigation', () =
 
       await waitFor(() => {
         expect(screen.getByText(/Examination Monitoring & Oversight|Examinations & Assessments/i)).toBeInTheDocument();
-        expect(screen.getByText('All Systems')).toBeInTheDocument();
+        expect(screen.getByText(/System Launcher →/i)).toBeInTheDocument();
       });
 
-      // Click "All Systems" to return back to launcher
-      const backBtn = screen.getByRole('button', { name: /All Systems/i });
+      // Click "System Launcher →" to return back to launcher
+      const backBtn = screen.getByRole('button', { name: /System Launcher →/i });
       fireEvent.click(backBtn);
 
       await waitFor(() => {
@@ -351,11 +351,11 @@ describe('Unified School ERP: Public Website & System Launcher Navigation', () =
 
       await waitFor(() => {
         expect(screen.getByText('Daily Attendance & Roll-Call Registers')).toBeInTheDocument();
-        expect(screen.getByText('All Systems')).toBeInTheDocument();
+        expect(screen.getByText(/System Launcher →/i)).toBeInTheDocument();
       });
 
-      // Click "All Systems" to return back to launcher
-      const backBtn = screen.getByRole('button', { name: /All Systems/i });
+      // Click "System Launcher →" to return back to launcher
+      const backBtn = screen.getByRole('button', { name: /System Launcher →/i });
       fireEvent.click(backBtn);
 
       await waitFor(() => {
@@ -381,11 +381,11 @@ describe('Unified School ERP: Public Website & System Launcher Navigation', () =
 
       await waitFor(() => {
         expect(screen.getAllByText('Teacher & Staff Management').length).toBeGreaterThanOrEqual(1);
-        expect(screen.getByText('All Systems')).toBeInTheDocument();
+        expect(screen.getByText(/System Launcher →/i)).toBeInTheDocument();
       });
 
-      // Click "All Systems" to return back to launcher
-      const backBtn = screen.getByRole('button', { name: /All Systems/i });
+      // Click "System Launcher →" to return back to launcher
+      const backBtn = screen.getByRole('button', { name: /System Launcher →/i });
       fireEvent.click(backBtn);
 
       await waitFor(() => {
@@ -411,11 +411,11 @@ describe('Unified School ERP: Public Website & System Launcher Navigation', () =
 
       await waitFor(() => {
         expect(screen.getAllByText('Fee Management Workspace').length).toBeGreaterThanOrEqual(1);
-        expect(screen.getByText('All Systems')).toBeInTheDocument();
+        expect(screen.getByText(/System Launcher →/i)).toBeInTheDocument();
       });
 
-      // Click "All Systems" to return back to launcher
-      const backBtn = screen.getByRole('button', { name: /All Systems/i });
+      // Click "System Launcher →" to return back to launcher
+      const backBtn = screen.getByRole('button', { name: /System Launcher →/i });
       fireEvent.click(backBtn);
 
       await waitFor(() => {
@@ -472,8 +472,8 @@ describe('Unified School ERP: Public Website & System Launcher Navigation', () =
         expect(screen.getByText('Academic Setup & Governance')).toBeInTheDocument();
       });
 
-      // Return via workspace back button
-      const backBtn = screen.getByRole('button', { name: /All Systems/i });
+      // Return via workspace launcher button
+      const backBtn = screen.getByRole('button', { name: /System Launcher →/i });
       fireEvent.click(backBtn);
 
       await waitFor(() => {

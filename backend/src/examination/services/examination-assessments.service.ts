@@ -8,7 +8,7 @@ import {
   Logger,
   Optional,
 } from '@nestjs/common';
-import { TeacherStatus, UserRole } from '@prisma/client';
+import { TeacherStatus, UserRole, ViolationEventType } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
   EXAMINATION_REPOSITORY,
@@ -21,7 +21,9 @@ import {
   AssessmentDraftRecord,
   AssessmentMode,
   AssessmentStatus,
+  AttemptStatus,
   AuthenticatedUser,
+  getConfiguredViolationTypes,
   ReleaseResultsResponseDto,
 } from '../types';
 import { ExaminationStudentAttemptsService } from './examination-student-attempts.service';
@@ -334,6 +336,8 @@ export class ExaminationAssessmentsService {
       endWindowAt: dto.endWindowAt ? new Date(dto.endWindowAt) : null,
       shuffleQuestions: dto.shuffleQuestions ?? false,
       shuffleOptions: dto.shuffleOptions ?? false,
+      enableProctoring: dto.enableProctoring ?? false,
+      monitoringConfig: dto.monitoringConfig ?? null,
     });
   }
 
@@ -481,6 +485,8 @@ export class ExaminationAssessmentsService {
       endWindowAt: dto.endWindowAt ? new Date(dto.endWindowAt) : dto.endWindowAt === null ? null : undefined,
       shuffleQuestions: dto.shuffleQuestions,
       shuffleOptions: dto.shuffleOptions,
+      enableProctoring: dto.enableProctoring,
+      monitoringConfig: dto.monitoringConfig,
     });
   }
 
@@ -896,5 +902,337 @@ export class ExaminationAssessmentsService {
     }
 
     return this.examRepo.closeAssessmentAtomic(schoolId, id);
+  }
+
+  /**
+   * GET /api/v1/examination/assessments/:id/attempts
+   * Retrieve minimal attempt summaries for an assessment (teacher-authorized).
+   */
+  async listAssessmentAttempts(
+    schoolId: string,
+    assessmentId: string,
+    user: AuthenticatedUser,
+  ) {
+    const assessment = await this.examRepo.findAssessmentById(schoolId, assessmentId);
+    if (!assessment) {
+      throw new NotFoundException('Assessment not found in this school');
+    }
+
+    if (user.role === UserRole.TEACHER) {
+      const teacher = await this.prisma.teacher.findFirst({
+        where: { schoolId, userId: user.id, status: TeacherStatus.ACTIVE },
+      });
+      if (!teacher || assessment.teacherId !== teacher.id) {
+        throw new ForbiddenException('You may only view attempts for assessments you authored');
+      }
+    }
+
+    const attempts = await this.prisma.assessmentAttempt.findMany({
+      where: { schoolId, assessmentId },
+      orderBy: { startedAt: 'desc' },
+      include: {
+        student: {
+          select: {
+            id: true,
+            admissionNumber: true,
+            rollNumber: true,
+            firstName: true,
+            lastName: true,
+          },
+        },
+        violationEvents: {
+          select: {
+            id: true,
+            eventType: true,
+            dismissed: true,
+          },
+        },
+      },
+    });
+
+    const monitoringConfig = (assessment.monitoringConfig as any) || {};
+    const maxAllowed = monitoringConfig.maxWarnings ?? 3;
+    const configuredTypes = getConfiguredViolationTypes(monitoringConfig);
+
+    return attempts.map((att) => {
+      let activeMisconductViolations = 0;
+      let activeViolations = 0;
+      let activeObjectDetections = 0;
+      for (const ev of att.violationEvents) {
+        if (!ev.dismissed) {
+          activeViolations++;
+          if (configuredTypes.includes(ev.eventType as any)) {
+            activeMisconductViolations++;
+          }
+          if (ev.eventType === ViolationEventType.OBJECT_DETECTED) {
+            activeObjectDetections++;
+          }
+        }
+      }
+
+      const isLocked =
+        Boolean(assessment.enableProctoring) &&
+        activeMisconductViolations >= maxAllowed &&
+        att.status === AttemptStatus.IN_PROGRESS;
+
+      const studentName =
+        [att.student?.firstName, att.student?.lastName].filter(Boolean).join(' ') ||
+        'Unknown Student';
+
+      return {
+        id: att.id,
+        studentId: att.studentId,
+        studentName,
+        admissionNumber: att.student?.admissionNumber || null,
+        rollNumber: att.student?.rollNumber || null,
+        status: att.status,
+        warningCount: activeMisconductViolations,
+        totalViolationsCount: activeViolations,
+        maxWarnings: maxAllowed,
+        isLocked,
+        flaggedForReview: att.flaggedForReview,
+        startedAt: att.startedAt,
+        deadlineAt: att.deadlineAt,
+        submittedAt: att.submittedAt,
+      };
+    });
+  }
+
+  /**
+   * GET /api/v1/examination/assessments/:id/attempts/:attemptId/integrity-audit
+   * Retrieve proctoring audit log, preflight check status, and violation timeline for an attempt.
+   */
+  async getAttemptIntegrityAudit(
+    schoolId: string,
+    assessmentId: string,
+    attemptId: string,
+    user: AuthenticatedUser,
+  ) {
+    const assessment = await this.examRepo.findAssessmentById(schoolId, assessmentId);
+    if (!assessment) {
+      throw new NotFoundException('Assessment not found in this school');
+    }
+
+    if (user.role === UserRole.TEACHER) {
+      const teacher = await this.prisma.teacher.findFirst({
+        where: { schoolId, userId: user.id, status: TeacherStatus.ACTIVE },
+      });
+      if (!teacher || assessment.teacherId !== teacher.id) {
+        throw new ForbiddenException('You may only view integrity audits for assessments you authored');
+      }
+    }
+
+    const attempt = await this.prisma.assessmentAttempt.findFirst({
+      where: { schoolId, assessmentId, id: attemptId },
+      include: {
+        student: {
+          select: {
+            id: true,
+            admissionNumber: true,
+            rollNumber: true,
+            firstName: true,
+            lastName: true,
+          },
+        },
+        violationEvents: {
+          orderBy: { timestamp: 'asc' },
+        },
+      },
+    });
+
+    if (!attempt) {
+      throw new NotFoundException('Assessment attempt not found');
+    }
+
+    const monitoringConfig = (assessment.monitoringConfig as any) || {};
+    const maxAllowed = monitoringConfig.maxWarnings ?? 3;
+    const configuredTypes = getConfiguredViolationTypes(monitoringConfig);
+
+    const eventCounts: Record<string, number> = {};
+    let activeViolations = 0;
+    let activeMisconductViolations = 0;
+    let activeObjectDetections = 0;
+    for (const event of attempt.violationEvents) {
+      eventCounts[event.eventType] = (eventCounts[event.eventType] || 0) + 1;
+      if (!event.dismissed) {
+        activeViolations++;
+        if (configuredTypes.includes(event.eventType as any)) {
+          activeMisconductViolations++;
+        }
+        if (event.eventType === ViolationEventType.OBJECT_DETECTED) {
+          activeObjectDetections++;
+        }
+      }
+    }
+
+    const isLocked =
+      assessment.enableProctoring &&
+      activeMisconductViolations >= maxAllowed &&
+      attempt.status === AttemptStatus.IN_PROGRESS;
+
+    return {
+      attempt: {
+        id: attempt.id,
+        status: attempt.status,
+        startedAt: attempt.startedAt,
+        deadlineAt: attempt.deadlineAt,
+        submittedAt: attempt.submittedAt,
+        proctoringPassed: attempt.proctoringPassed,
+        preflightData: attempt.preflightData,
+        flaggedForReview: attempt.flaggedForReview,
+        studentExplanation: attempt.studentExplanation,
+        isLocked,
+        activeMisconductViolations,
+        maxAllowed,
+      },
+      assessment: {
+        id: assessment.id,
+        title: assessment.title,
+        enableProctoring: assessment.enableProctoring,
+        monitoringConfig: assessment.monitoringConfig,
+      },
+      student: attempt.student,
+      events: attempt.violationEvents,
+      summary: {
+        totalEvents: attempt.violationEvents.length,
+        activeViolations,
+        activeMisconductViolations,
+        maxAllowed,
+        isLocked,
+        eventCounts,
+      },
+    };
+  }
+
+  /**
+   * PATCH /api/v1/examination/assessments/:id/attempts/:attemptId/integrity-audit/:eventId/dismiss
+   * Dismiss an integrity violation event (false positive review).
+   */
+  async dismissViolationEvent(
+    schoolId: string,
+    assessmentId: string,
+    attemptId: string,
+    eventId: string,
+    user: AuthenticatedUser,
+  ) {
+    this.assertTeacherAuthoring(user, 'review and dismiss violations');
+
+    const assessment = await this.examRepo.findAssessmentById(schoolId, assessmentId);
+    if (!assessment) {
+      throw new NotFoundException('Assessment not found in this school');
+    }
+
+    const teacher = await this.prisma.teacher.findFirst({
+      where: { schoolId, userId: user.id, status: TeacherStatus.ACTIVE },
+    });
+    if (!teacher || assessment.teacherId !== teacher.id) {
+      throw new ForbiddenException('You may only dismiss violations for assessments you authored');
+    }
+
+    const event = await this.prisma.assessmentViolationEvent.findFirst({
+      where: { schoolId, assessmentId, attemptId, id: eventId },
+    });
+    if (!event) {
+      throw new NotFoundException('Violation event not found');
+    }
+
+    const attempt = await this.prisma.assessmentAttempt.findFirst({
+      where: { schoolId, assessmentId, id: attemptId },
+    });
+    if (!attempt) {
+      throw new NotFoundException('Assessment attempt not found');
+    }
+
+    const updatedEvent = await this.prisma.assessmentViolationEvent.update({
+      where: { id: event.id },
+      data: { dismissed: true },
+    });
+
+    const monitoringConfig = (assessment.monitoringConfig as any) || {};
+    const maxAllowed = monitoringConfig.maxWarnings ?? 3;
+    const configuredTypes = getConfiguredViolationTypes(monitoringConfig);
+
+    const remainingActive = await this.prisma.assessmentViolationEvent.count({
+      where: { schoolId, attemptId, dismissed: false },
+    });
+
+    const remainingMisconduct = await this.prisma.assessmentViolationEvent.count({
+      where: { schoolId, attemptId, dismissed: false, eventType: { in: configuredTypes as any } },
+    });
+
+    const remainingObjectDetections = await this.prisma.assessmentViolationEvent.count({
+      where: { schoolId, attemptId, dismissed: false, eventType: ViolationEventType.OBJECT_DETECTED },
+    });
+
+    const isLocked =
+      assessment.enableProctoring &&
+      remainingMisconduct >= maxAllowed &&
+      attempt.status === AttemptStatus.IN_PROGRESS;
+
+    if (remainingActive === 0) {
+      await this.prisma.assessmentAttempt.update({
+        where: { id: attemptId },
+        data: { flaggedForReview: false },
+      });
+    }
+
+    return {
+      success: true,
+      dismissedEventId: updatedEvent.id,
+      remainingActiveViolations: remainingActive,
+      remainingMisconductViolations: remainingMisconduct,
+      isLocked,
+    };
+  }
+
+  /**
+   * PATCH /api/v1/examination/assessments/:id/attempts/:attemptId/unlock
+   * Teacher reviews and unlocks a locked attempt by dismissing active violation events.
+   */
+  async unlockAttempt(
+    schoolId: string,
+    assessmentId: string,
+    attemptId: string,
+    user: AuthenticatedUser,
+  ) {
+    this.assertTeacherAuthoring(user, 'review and unlock attempts');
+
+    const assessment = await this.examRepo.findAssessmentById(schoolId, assessmentId);
+    if (!assessment) {
+      throw new NotFoundException('Assessment not found in this school');
+    }
+
+    const teacher = await this.prisma.teacher.findFirst({
+      where: { schoolId, userId: user.id, status: TeacherStatus.ACTIVE },
+    });
+    if (!teacher || assessment.teacherId !== teacher.id) {
+      throw new ForbiddenException('You may only unlock attempts for assessments you authored');
+    }
+
+    const attempt = await this.prisma.assessmentAttempt.findFirst({
+      where: { schoolId, assessmentId, id: attemptId },
+    });
+    if (!attempt) {
+      throw new NotFoundException('Assessment attempt not found');
+    }
+
+    // Dismiss active violation events
+    await this.prisma.assessmentViolationEvent.updateMany({
+      where: { schoolId, attemptId, dismissed: false },
+      data: { dismissed: true },
+    });
+
+    // Unflag attempt
+    await this.prisma.assessmentAttempt.update({
+      where: { id: attemptId },
+      data: { flaggedForReview: false },
+    });
+
+    return {
+      success: true,
+      message: 'Attempt has been reviewed and unlocked by teacher',
+      attemptId,
+      isLocked: false,
+    };
   }
 }

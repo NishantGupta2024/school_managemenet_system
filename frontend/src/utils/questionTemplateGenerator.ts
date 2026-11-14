@@ -47,6 +47,19 @@ export async function buildQuestionTemplateWorkbook(): Promise<ExcelJSNamespace.
   headerRow.alignment = { vertical: 'middle', horizontal: 'center' };
   headerRow.height = 26;
 
+  // Illustrative sample row at Row 2 (clearly visible so teachers can replace or delete it)
+  const sampleRow = questionSheet.addRow({
+    serialNumber: 'SAMPLE',
+    question: '[SAMPLE QUESTION - REPLACE OR DELETE] What is the SI unit of electric current?',
+    optionA: 'Ampere',
+    optionB: 'Volt',
+    optionC: 'Ohm',
+    optionD: 'Watt',
+    correctOption: 'A',
+    marks: 1.00,
+  });
+  sampleRow.font = { italic: true, color: { argb: 'FF64748B' } };
+
   // Add validation rules to data rows (rows 2 through 500)
   for (let r = 2; r <= 500; r++) {
     // Column G (Correct Option): Dropdown validation A, B, C, D
@@ -72,19 +85,6 @@ export async function buildQuestionTemplateWorkbook(): Promise<ExcelJSNamespace.
       error: 'Marks must be a positive number between 0.01 and 500.00',
     };
   }
-
-  // Illustrative sample row (clearly designated as sample so it is never accidentally imported as a real question)
-  const sampleRow = questionSheet.addRow({
-    serialNumber: 'SAMPLE',
-    question: '[SAMPLE QUESTION - REPLACE OR DELETE] What is the SI unit of electric current?',
-    optionA: 'Ampere',
-    optionB: 'Volt',
-    optionC: 'Ohm',
-    optionD: 'Watt',
-    correctOption: 'A',
-    marks: 1.00,
-  });
-  sampleRow.font = { italic: true, color: { argb: 'FF64748B' } };
 
   // =========================================================================
   // Worksheet 2: Instructions & Reference Examples

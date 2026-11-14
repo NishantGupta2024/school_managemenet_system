@@ -1,7 +1,6 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  ArrowLeft,
   FileSpreadsheet,
   Lock,
   CheckCircle2,
@@ -103,33 +102,22 @@ export const ExaminationWorkspace: React.FC = () => {
       {/* 1. Top Workspace Navigation Bar                                     */}
       {/* ------------------------------------------------------------------- */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => navigate('/app')}
-            className="p-2 border border-slate-200 hover:bg-slate-50 text-slate-600 rounded-xl transition-colors flex items-center gap-1.5 text-xs font-semibold"
-            title="Return to System Launcher"
-          >
-            <ArrowLeft className="w-4 h-4" />
-            <span>All Systems</span>
-          </button>
-          <div className="h-6 w-px bg-slate-200 hidden sm:block" />
-          <div className="flex items-center gap-2">
-            <div className="p-2 bg-indigo-50 text-indigo-600 rounded-xl border border-indigo-100">
-              <FileSpreadsheet className="w-5 h-5" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h2 className="text-base font-bold text-slate-900 tracking-tight leading-tight">
-                  {headerInfo.title}
-                </h2>
-                <span className={`px-2 py-0.5 text-[10px] font-bold border rounded-full ${headerInfo.badgeColor}`}>
-                  {headerInfo.badge}
-                </span>
-              </div>
-              <span className="text-[11px] text-slate-400 font-medium">
-                {headerInfo.subtitle}
+        <div className="flex items-center gap-2">
+          <div className="p-2 bg-indigo-50 text-indigo-600 rounded-xl border border-indigo-100">
+            <FileSpreadsheet className="w-5 h-5" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <h2 className="text-base font-bold text-slate-900 tracking-tight leading-tight">
+                {headerInfo.title}
+              </h2>
+              <span className={`px-2 py-0.5 text-[10px] font-bold border rounded-full ${headerInfo.badgeColor}`}>
+                {headerInfo.badge}
               </span>
             </div>
+            <span className="text-[11px] text-slate-400 font-medium">
+              {headerInfo.subtitle}
+            </span>
           </div>
         </div>
 

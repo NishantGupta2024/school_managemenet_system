@@ -85,6 +85,7 @@ describe('ExaminationProgressionService - Unit Tests', () => {
     };
 
     examRepoMock = {
+      findChapters: jest.fn().mockResolvedValue([]),
       findChapterById: jest.fn().mockResolvedValue(mockChapter),
       findAssessmentById: jest.fn(),
       findChapterAssessmentsForStudent: jest.fn().mockResolvedValue([]),
@@ -545,6 +546,44 @@ describe('ExaminationProgressionService - Unit Tests', () => {
       expect(res.isUnlocked).toBe(true);
       expect(res.assessments[0].status).toBe(ProgressionAssessmentStatus.OVERRIDDEN);
       expect(res.assessments[0].resolved).toBe(true);
+    });
+  });
+
+  describe('13. listChaptersForStudent', () => {
+    it('returns curriculum chapters securely scoped to student school, grade, and academic year', async () => {
+      prismaMock.student.findFirst.mockResolvedValue(mockStudent);
+      examRepoMock.findChapters.mockResolvedValue([mockChapter]);
+
+      const chapters = await service.listChaptersForStudent(mockSchoolId, { id: 'user-01' });
+
+      expect(prismaMock.student.findFirst).toHaveBeenCalledWith({
+        where: {
+          schoolId: mockSchoolId,
+          userId: 'user-01',
+          status: 'ACTIVE',
+        },
+      });
+      expect(examRepoMock.findChapters).toHaveBeenCalledWith(mockSchoolId, {
+        gradeId: mockGradeId,
+        academicYearId: mockAYId,
+      });
+      expect(chapters).toEqual([
+        {
+          id: mockChapterId,
+          chapterCode: 'PHY-01',
+          title: 'Kinematics',
+          subject: 'Physics',
+          orderIndex: 1,
+        },
+      ]);
+    });
+
+    it('throws ForbiddenException when active student profile is not found', async () => {
+      prismaMock.student.findFirst.mockResolvedValue(null);
+
+      await expect(
+        service.listChaptersForStudent(mockSchoolId, { id: 'unknown-user' }),
+      ).rejects.toThrow(ForbiddenException);
     });
   });
 });

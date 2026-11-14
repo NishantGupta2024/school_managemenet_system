@@ -55,6 +55,8 @@ export interface CreateAssessmentDraftData {
   endWindowAt: Date | null;
   shuffleQuestions: boolean;
   shuffleOptions: boolean;
+  enableProctoring?: boolean;
+  monitoringConfig?: any;
 }
 
 export interface UpdateAssessmentDraftData {
@@ -73,6 +75,8 @@ export interface UpdateAssessmentDraftData {
   endWindowAt?: Date | null;
   shuffleQuestions?: boolean;
   shuffleOptions?: boolean;
+  enableProctoring?: boolean;
+  monitoringConfig?: any;
 }
 
 export interface AssessmentFilter {

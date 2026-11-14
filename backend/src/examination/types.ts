@@ -3,6 +3,37 @@ export enum AssessmentMode {
   LIVE_EXAM = 'LIVE_EXAM',
 }
 
+export enum ViolationEventType {
+  FULLSCREEN_EXIT = 'FULLSCREEN_EXIT',
+  TAB_BLUR = 'TAB_BLUR',
+  VISIBILITY_HIDDEN = 'VISIBILITY_HIDDEN',
+  MULTIPLE_FACES = 'MULTIPLE_FACES',
+  NO_FACE = 'NO_FACE',
+  SUSPICIOUS_AUDIO = 'SUSPICIOUS_AUDIO',
+  NETWORK_ANOMALY = 'NETWORK_ANOMALY',
+  OBJECT_DETECTED = 'OBJECT_DETECTED',
+}
+
+export function getConfiguredViolationTypes(monitoringConfig: any): ViolationEventType[] {
+  const types: ViolationEventType[] = [];
+  if (monitoringConfig?.requireFullscreen !== false) {
+    types.push(ViolationEventType.FULLSCREEN_EXIT);
+  }
+  if (monitoringConfig?.detectTabSwitch !== false) {
+    types.push(ViolationEventType.TAB_BLUR, ViolationEventType.VISIBILITY_HIDDEN);
+  }
+  if (monitoringConfig?.requireWebcam === true) {
+    types.push(ViolationEventType.NO_FACE, ViolationEventType.MULTIPLE_FACES);
+  }
+  if (monitoringConfig?.requireMic === true) {
+    types.push(ViolationEventType.SUSPICIOUS_AUDIO);
+  }
+  if (monitoringConfig?.includeNetworkAnomaly === true) {
+    types.push(ViolationEventType.NETWORK_ANOMALY);
+  }
+  return types;
+}
+
 export enum AssessmentStatus {
   DRAFT = 'DRAFT',
   PUBLISHED = 'PUBLISHED',
@@ -45,6 +76,8 @@ export interface AssessmentDraftRecord {
   endWindowAt: Date | null;
   shuffleQuestions: boolean;
   shuffleOptions: boolean;
+  enableProctoring?: boolean;
+  monitoringConfig?: any;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -185,6 +218,10 @@ export interface AssessmentAttemptRecord {
   startedAt: Date;
   deadlineAt: Date;
   submittedAt: Date | null;
+  proctoringPassed?: boolean;
+  preflightData?: any;
+  flaggedForReview?: boolean;
+  studentExplanation?: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -227,6 +264,9 @@ export interface StudentAssessmentOverviewDto {
   hasAttempt: boolean;
   attemptStatus: AttemptStatus | null;
   attemptId: string | null;
+  enableProctoring?: boolean;
+  monitoringConfig?: any;
+  proctoringPassed?: boolean;
 }
 
 export interface StudentAttemptDetailDto {
@@ -238,6 +278,15 @@ export interface StudentAttemptDetailDto {
   deadlineAt: Date;
   remainingSeconds: number;
   submittedAt: Date | null;
+  enableProctoring?: boolean;
+  monitoringConfig?: any;
+  proctoringPassed?: boolean;
+  preflightData?: any;
+  flaggedForReview?: boolean;
+  studentExplanation?: string | null;
+  isLocked?: boolean;
+  activeWarningsCount?: number;
+  maxWarnings?: number;
   questions: StudentSanitizedQuestionDto[];
   answers: Record<string, number | null>;
 }
@@ -286,6 +335,14 @@ export interface StudentAssessmentProgressionRecord {
   unlockedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
+}
+
+export interface StudentChapterOptionDto {
+  id: string;
+  chapterCode: string;
+  title: string;
+  subject: string;
+  orderIndex: number;
 }
 
 export interface ChapterProgressionAssessmentItemDto {

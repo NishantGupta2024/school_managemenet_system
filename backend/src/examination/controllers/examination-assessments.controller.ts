@@ -131,4 +131,66 @@ export class ExaminationAssessmentsController {
     const schoolId = req.school.id;
     return this.assessmentsService.closeAssessment(schoolId, id, req.user);
   }
+
+  /**
+   * GET /api/v1/examination/assessments/:id/attempts
+   * Retrieve minimal attempt summaries for an assessment (teacher-authorized).
+   */
+  @Get(':id/attempts')
+  @Roles(UserRole.TEACHER, UserRole.SCHOOL_ADMIN, UserRole.PLATFORM_SUPER_ADMIN)
+  async listAssessmentAttempts(
+    @Request() req: any,
+    @Param('id', new ParseUUIDPipe()) id: string,
+  ) {
+    const schoolId = req.school.id;
+    return this.assessmentsService.listAssessmentAttempts(schoolId, id, req.user);
+  }
+
+  /**
+   * GET /api/v1/examination/assessments/:id/attempts/:attemptId/integrity-audit
+   * Retrieve integrity violations, preflight checks, and audit timeline for an attempt.
+   */
+  @Get(':id/attempts/:attemptId/integrity-audit')
+  @Roles(UserRole.TEACHER, UserRole.SCHOOL_ADMIN, UserRole.PLATFORM_SUPER_ADMIN)
+  async getAttemptIntegrityAudit(
+    @Request() req: any,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('attemptId', new ParseUUIDPipe()) attemptId: string,
+  ) {
+    const schoolId = req.school.id;
+    return this.assessmentsService.getAttemptIntegrityAudit(schoolId, id, attemptId, req.user);
+  }
+
+  /**
+   * PATCH /api/v1/examination/assessments/:id/attempts/:attemptId/integrity-audit/:eventId/dismiss
+   * Dismiss a flagged violation event after human teacher review.
+   */
+  @Patch(':id/attempts/:attemptId/integrity-audit/:eventId/dismiss')
+  @HttpCode(HttpStatus.OK)
+  @Roles(UserRole.TEACHER)
+  async dismissViolationEvent(
+    @Request() req: any,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('attemptId', new ParseUUIDPipe()) attemptId: string,
+    @Param('eventId', new ParseUUIDPipe()) eventId: string,
+  ) {
+    const schoolId = req.school.id;
+    return this.assessmentsService.dismissViolationEvent(schoolId, id, attemptId, eventId, req.user);
+  }
+
+  /**
+   * PATCH /api/v1/examination/assessments/:id/attempts/:attemptId/unlock
+   * Teacher reviews and unlocks a locked attempt.
+   */
+  @Patch(':id/attempts/:attemptId/unlock')
+  @HttpCode(HttpStatus.OK)
+  @Roles(UserRole.TEACHER)
+  async unlockAttempt(
+    @Request() req: any,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('attemptId', new ParseUUIDPipe()) attemptId: string,
+  ) {
+    const schoolId = req.school.id;
+    return this.assessmentsService.unlockAttempt(schoolId, id, attemptId, req.user);
+  }
 }

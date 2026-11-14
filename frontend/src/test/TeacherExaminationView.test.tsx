@@ -7,6 +7,7 @@ import {
   examinationApi,
   AssessmentMode,
   AssessmentStatus,
+  AttemptStatus,
   AssessmentDraft,
   AssessmentChapter,
 } from '../services/examination.api';
@@ -225,21 +226,27 @@ vi.mock('../services/api', async (importOriginal) => {
 
 vi.mock('../services/examination.api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../services/examination.api')>();
+  const mockApi = {
+    ...actual.examinationApi,
+    listAssessments: vi.fn(),
+    listChapters: vi.fn(),
+    createChapter: vi.fn(),
+    createDraft: vi.fn(),
+    updateDraft: vi.fn(),
+    deleteDraft: vi.fn(),
+    listQuestions: vi.fn(),
+    publishAssessment: vi.fn(),
+    closeAssessment: vi.fn(),
+    releaseResults: vi.fn(),
+    listAssessmentAttempts: vi.fn(),
+    getAttemptIntegrityAudit: vi.fn(),
+    dismissViolationEvent: vi.fn(),
+    unlockAttempt: vi.fn(),
+  };
   return {
     ...actual,
-    examinationApi: {
-      ...actual.examinationApi,
-      listAssessments: vi.fn(),
-      listChapters: vi.fn(),
-      createChapter: vi.fn(),
-      createDraft: vi.fn(),
-      updateDraft: vi.fn(),
-      deleteDraft: vi.fn(),
-      listQuestions: vi.fn(),
-      publishAssessment: vi.fn(),
-      closeAssessment: vi.fn(),
-      releaseResults: vi.fn(),
-    },
+    examinationApi: mockApi,
+    default: mockApi,
   };
 });
 
@@ -945,7 +952,7 @@ describe('TeacherExaminationView Component', () => {
     });
   });
 
-  it('displays Release Results on CLOSED assessment and disables it before end window', async () => {
+  it('displays Release Results on CLOSED assessment and allows releasing even before scheduled end window', async () => {
     // Create a closed assessment whose end window is in the future
     const futureDate = new Date(Date.now() + 86400000).toISOString();
     const closedAssessment: AssessmentDraft = {
@@ -968,10 +975,10 @@ describe('TeacherExaminationView Component', () => {
       expect(screen.getByText('History Finals Exam')).toBeInTheDocument();
     });
 
-    // Release button is present but disabled because end window is in future
+    // Release button is present and enabled because exam is CLOSED
     const releaseBtn = screen.getByRole('button', { name: /release results/i });
     expect(releaseBtn).toBeInTheDocument();
-    expect(releaseBtn).toBeDisabled();
+    expect(releaseBtn).not.toBeDisabled();
   });
 
   it('releases results after confirmation when eligible and displays error on API rejection', async () => {
@@ -1047,5 +1054,100 @@ describe('TeacherExaminationView Component', () => {
     expect(screen.queryByRole('button', { name: /^close$/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /release results/i })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /leaderboard/i })).toBeInTheDocument();
+  });
+
+  it('displays Integrity Audit button on non-draft assessments and opens attempts list and audit modal', async () => {
+    const proctoredAssessment: AssessmentDraft = {
+      ...mockAssessments[0],
+      id: 'as-proctor-1',
+      title: 'Physics Proctored Final',
+      status: AssessmentStatus.CLOSED,
+      enableProctoring: true,
+    };
+
+    (examinationApi.listAssessments as any).mockResolvedValue([proctoredAssessment]);
+    (examinationApi.listAssessmentAttempts as any).mockResolvedValue([
+      {
+        id: 'att-nish-1',
+        studentId: 'st-1',
+        studentName: 'Nishu Gupta',
+        admissionNumber: 'ADM-001',
+        rollNumber: '1',
+        status: AttemptStatus.IN_PROGRESS,
+        warningCount: 3,
+        totalViolationsCount: 3,
+        maxWarnings: 3,
+        isLocked: true,
+        flaggedForReview: true,
+        startedAt: '2026-11-12T10:00:00Z',
+        deadlineAt: '2026-11-12T11:00:00Z',
+        submittedAt: null,
+      },
+    ]);
+    (examinationApi.getAttemptIntegrityAudit as any).mockResolvedValue({
+      attempt: {
+        id: 'att-nish-1',
+        status: AttemptStatus.IN_PROGRESS,
+        startedAt: '2026-11-12T10:00:00Z',
+        deadlineAt: '2026-11-12T11:00:00Z',
+        submittedAt: null,
+        proctoringPassed: true,
+        preflightData: { latencyMs: 25 },
+        flaggedForReview: true,
+        studentExplanation: null,
+        isLocked: true,
+      },
+      assessment: {
+        id: 'as-proctor-1',
+        title: 'Physics Proctored Final',
+        enableProctoring: true,
+      },
+      student: {
+        id: 'st-1',
+        admissionNumber: 'ADM-001',
+        rollNumber: '1',
+        firstName: 'Nishu',
+        lastName: 'Gupta',
+      },
+      events: [],
+      summary: {
+        totalEvents: 0,
+        activeViolations: 3,
+        isLocked: true,
+        eventCounts: {},
+      },
+    });
+
+    render(
+      <AuthProvider>
+        <TeacherExaminationView />
+      </AuthProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('Physics Proctored Final')).toBeInTheDocument();
+    });
+
+    // 1. Integrity Audit button is present
+    const integrityAuditBtn = screen.getByRole('button', { name: /integrity audit/i });
+    expect(integrityAuditBtn).toBeInTheDocument();
+
+    // 2. Clicking Integrity Audit opens the attempts list modal
+    fireEvent.click(integrityAuditBtn);
+
+    await waitFor(() => {
+      expect(screen.getByText('Integrity Audit & Student Attempts')).toBeInTheDocument();
+      expect(screen.getByText('Nishu Gupta')).toBeInTheDocument();
+      expect(screen.getByText('Locked (3/3)')).toBeInTheDocument();
+    });
+
+    // 3. Clicking Audit & Unlock opens the AssessmentIntegrityAuditModal
+    const auditBtn = screen.getByRole('button', { name: /audit & unlock/i });
+    fireEvent.click(auditBtn);
+
+    await waitFor(() => {
+      expect(screen.getByText('Student Attempt is Currently Locked')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /unlock attempt/i })).toBeInTheDocument();
+    });
   });
 });

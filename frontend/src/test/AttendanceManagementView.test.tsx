@@ -514,7 +514,7 @@ describe('AttendanceRegisterView and Attendance Frontend Suite', () => {
     expect(
       await screen.findByText('Daily Attendance & Roll-Call Registers'),
     ).toBeInTheDocument();
-    expect(screen.getByText('All Systems')).toBeInTheDocument();
+    expect(screen.getByText('System Launcher →')).toBeInTheDocument();
 
     // Verify child view loaded
     expect(screen.getByText('Daily Attendance Register')).toBeInTheDocument();

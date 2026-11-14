@@ -274,6 +274,7 @@ model School {
   attemptAnswers                  AttemptAnswer[]
   assessmentResults               AssessmentResult[]
   studentAssessmentProgressions   StudentAssessmentProgression[]
+  assessmentViolationEvents       AssessmentViolationEvent[]
   examinationSetting              SchoolExaminationSetting?
 
   @@unique([id, defaultReceiptTemplateId])
@@ -461,6 +462,7 @@ model Student {
   assessmentAttempts    AssessmentAttempt[]
   assessmentResults     AssessmentResult[]
   assessmentProgressions StudentAssessmentProgression[]
+  assessmentViolationEvents AssessmentViolationEvent[]
 
   @@unique([schoolId, admissionNumber])
   @@unique([schoolId, id])
@@ -1745,6 +1747,8 @@ model Assessment {
   endWindowAt      DateTime?
   shuffleQuestions Boolean          @default(false)
   shuffleOptions   Boolean          @default(false)
+  enableProctoring Boolean          @default(false)
+  monitoringConfig Json?
   createdAt        DateTime         @default(now())
   updatedAt        DateTime         @updatedAt
 
@@ -1762,6 +1766,7 @@ model Assessment {
   answers        AttemptAnswer[]
   results        AssessmentResult[]
   progressions   StudentAssessmentProgression[]
+  violationEvents AssessmentViolationEvent[]
 
   @@unique([schoolId, id])
   @@index([schoolId, status])
@@ -1859,16 +1864,21 @@ model AssessmentAttempt {
   studentId    String
   status       AttemptStatus @default(IN_PROGRESS)
   startedAt    DateTime      @default(now())
-  deadlineAt   DateTime
-  submittedAt  DateTime?
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
+  deadlineAt         DateTime
+  submittedAt        DateTime?
+  proctoringPassed   Boolean          @default(false)
+  preflightData      Json?
+  flaggedForReview   Boolean          @default(false)
+  studentExplanation String?          @db.VarChar(500)
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
 
   school     School            @relation(fields: [schoolId], references: [id], onDelete: Cascade)
   assessment Assessment        @relation(fields: [schoolId, assessmentId], references: [schoolId, id], onDelete: Restrict)
   student    Student           @relation(fields: [schoolId, studentId], references: [schoolId, id], onDelete: Restrict)
   result     AssessmentResult?
   answers    AttemptAnswer[]
+  violationEvents AssessmentViolationEvent[]
 
   @@unique([schoolId, id])
   @@unique([assessmentId, studentId])
@@ -1976,6 +1986,44 @@ model SchoolExaminationSetting {
   school School @relation(fields: [schoolId], references: [id], onDelete: Cascade)
 
   @@map("school_examination_settings")
+}
+
+// -------------------------------------------------------------
+// 10b. Assessment Violation Event: Integrity Monitoring Log
+// -------------------------------------------------------------
+enum ViolationEventType {
+  FULLSCREEN_EXIT
+  TAB_BLUR
+  VISIBILITY_HIDDEN
+  MULTIPLE_FACES
+  NO_FACE
+  SUSPICIOUS_AUDIO
+  NETWORK_ANOMALY
+  OBJECT_DETECTED
+}
+
+model AssessmentViolationEvent {
+  id           String             @id @default(uuid())
+  schoolId     String
+  assessmentId String
+  attemptId    String
+  studentId    String
+  eventType    ViolationEventType
+  timestamp    DateTime           @default(now())
+  durationMs   Int?
+  metadata     Json?
+  dismissed    Boolean            @default(false)
+  createdAt    DateTime           @default(now())
+
+  school     School            @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  assessment Assessment        @relation(fields: [schoolId, assessmentId], references: [schoolId, id], onDelete: Restrict)
+  attempt    AssessmentAttempt @relation(fields: [schoolId, attemptId], references: [schoolId, id], onDelete: Cascade)
+  student    Student           @relation(fields: [schoolId, studentId], references: [schoolId, id], onDelete: Restrict)
+
+  @@index([attemptId, timestamp])
+  @@index([assessmentId, eventType])
+  @@index([schoolId, studentId])
+  @@map("assessment_violation_events")
 }
 
 // -------------------------------------------------------------
