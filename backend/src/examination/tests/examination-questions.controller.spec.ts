@@ -1,7 +1,10 @@
-import { BadRequestException, ParseUUIDPipe } from '@nestjs/common';
+import { BadRequestException, INestApplication, ParseUUIDPipe } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { Reflector } from '@nestjs/core';
 import { UserRole } from '@prisma/client';
+import * as fs from 'fs';
+import * as http from 'http';
+import * as path from 'path';
 import { ExaminationQuestionsController } from '../controllers/examination-questions.controller';
 import { ExaminationQuestionsService } from '../services/examination-questions.service';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
@@ -317,6 +320,107 @@ describe('ExaminationQuestionsController', () => {
       await expect(
         pipe.transform('invalid-question-id', { type: 'param', data: 'id' }),
       ).rejects.toThrow(BadRequestException);
+    });
+  });
+
+  describe('Multipart FileInterceptor & Lockfile Regression (previewImport)', () => {
+    let app: INestApplication;
+
+    beforeEach(async () => {
+      const moduleRef: TestingModule = await Test.createTestingModule({
+        controllers: [ExaminationQuestionsController],
+        providers: [
+          Reflector,
+          { provide: ExaminationQuestionsService, useValue: service },
+        ],
+      })
+        .overrideGuard(JwtAuthGuard)
+        .useValue({
+          canActivate: (ctx: any) => {
+            const req = ctx.switchToHttp().getRequest();
+            req.user = { id: 'teacher-1', schoolId: 'sch-1', role: UserRole.TEACHER };
+            return true;
+          },
+        })
+        .overrideGuard(TenantGuard)
+        .useValue({
+          canActivate: (ctx: any) => {
+            const req = ctx.switchToHttp().getRequest();
+            req.school = mockSchool;
+            return true;
+          },
+        })
+        .overrideGuard(RolesGuard)
+        .useValue({ canActivate: () => true })
+        .compile();
+
+      app = moduleRef.createNestApplication();
+      app.setGlobalPrefix('api/v1');
+      await app.init();
+    });
+
+    afterEach(async () => {
+      if (app) {
+        await app.close();
+      }
+    });
+
+    it('ensures package-lock.json does not nest legacy type-is@1.6.18 under multer against media-typer@1.1.1', () => {
+      const lockfilePath = path.resolve(__dirname, '../../../../package-lock.json');
+      const lockfile = JSON.parse(fs.readFileSync(lockfilePath, 'utf8'));
+      expect(lockfile.packages['node_modules/multer/node_modules/type-is']).toBeUndefined();
+      expect(lockfile.packages['node_modules/type-is']?.version).toMatch(/^2\./);
+    });
+
+    it('populates req.file via FileInterceptor("file") for browser WebKitFormBoundary multipart POST to import/preview', async () => {
+      await app.listen(0);
+      const server = app.getHttpServer();
+      const address = server.address();
+      const port = typeof address === 'string' ? 0 : address.port;
+
+      const boundary = '----WebKitFormBoundary1Pjp6bX49TfwqgG1';
+      const xlsxBytes = Buffer.from('PK\x03\x04mock-excel-workbook-bytes');
+      const bodyHeader = Buffer.from(
+        `--${boundary}\r\n` +
+          `Content-Disposition: form-data; name="file"; filename="paper.xlsx"\r\n` +
+          `Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet\r\n\r\n`,
+      );
+      const bodyFooter = Buffer.from(`\r\n--${boundary}--\r\n`);
+      const fullBody = Buffer.concat([bodyHeader, xlsxBytes, bodyFooter]);
+
+      const response = await new Promise<{ statusCode: number; body: any }>((resolve, reject) => {
+        const req = http.request(
+          {
+            hostname: '127.0.0.1',
+            port,
+            path: `/api/v1/examination/assessments/${mockAssessmentId}/questions/import/preview`,
+            method: 'POST',
+            headers: {
+              'Content-Type': `multipart/form-data; boundary=${boundary}`,
+              'Content-Length': fullBody.length,
+            },
+          },
+          (res) => {
+            let data = '';
+            res.on('data', (chunk) => (data += chunk));
+            res.on('end', () => {
+              resolve({ statusCode: res.statusCode || 0, body: JSON.parse(data) });
+            });
+          },
+        );
+        req.on('error', reject);
+        req.write(fullBody);
+        req.end();
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.body).toEqual({ validCount: 5, invalidCount: 0 });
+      expect(service.previewImport).toHaveBeenCalledWith(
+        'sch-1',
+        mockAssessmentId,
+        xlsxBytes,
+        expect.objectContaining({ role: UserRole.TEACHER }),
+      );
     });
   });
 });
