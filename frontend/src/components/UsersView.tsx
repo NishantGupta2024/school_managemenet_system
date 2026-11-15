@@ -33,7 +33,12 @@ export const UsersView: React.FC = () => {
   const [staffList, setStaffList] = useState<UserProfile[]>([]);
   const [staffSearch, setStaffSearch] = useState<string>('');
   const [isCreateStaffOpen, setIsCreateStaffOpen] = useState<boolean>(false);
-  const [createStaffForm, setCreateStaffForm] = useState({ name: '', email: '', password: '' });
+  const [createStaffForm, setCreateStaffForm] = useState<{
+    name: string;
+    email: string;
+    password: string;
+    role: 'FEE_STAFF' | 'LIBRARIAN';
+  }>({ name: '', email: '', password: '', role: 'FEE_STAFF' });
   const [staffFormError, setStaffFormError] = useState<string | null>(null);
 
   // Student State
@@ -80,8 +85,11 @@ export const UsersView: React.FC = () => {
     setError(null);
     try {
       if (activeTab === 'STAFF') {
-        const staff = await usersApi.list({ role: UserRole.FEE_STAFF });
-        setStaffList(staff);
+        const [feeStaff, librarians] = await Promise.all([
+          usersApi.list({ role: UserRole.FEE_STAFF }),
+          usersApi.list({ role: UserRole.LIBRARIAN }),
+        ]);
+        setStaffList([...feeStaff, ...librarians]);
       } else if (activeTab === 'STUDENTS') {
         const [unlinked, linked] = await Promise.all([
           usersApi.getUnlinkedStudents(),
@@ -124,9 +132,10 @@ export const UsersView: React.FC = () => {
     setStaffFormError(null);
     try {
       await usersApi.createStaff(createStaffForm);
-      setSuccessMessage(`Fee Staff account "${createStaffForm.email}" successfully created.`);
+      const roleLabel = createStaffForm.role === 'LIBRARIAN' ? 'Librarian' : 'Fee Staff';
+      setSuccessMessage(`${roleLabel} account "${createStaffForm.email}" successfully created.`);
       setIsCreateStaffOpen(false);
-      setCreateStaffForm({ name: '', email: '', password: '' });
+      setCreateStaffForm({ name: '', email: '', password: '', role: 'FEE_STAFF' });
       loadData();
     } catch (err: any) {
       setStaffFormError(err?.response?.data?.message || err?.message || 'Failed to create staff account');
@@ -384,7 +393,7 @@ export const UsersView: React.FC = () => {
           }`}
         >
           <Users className="w-4 h-4" />
-          Fee Staff ({staffList.length})
+          Staff ({staffList.length})
         </button>
 
         <button
@@ -429,14 +438,14 @@ export const UsersView: React.FC = () => {
 
             <button
               onClick={() => {
-                setCreateStaffForm({ name: '', email: '', password: '' });
+                setCreateStaffForm({ name: '', email: '', password: '', role: 'FEE_STAFF' });
                 setStaffFormError(null);
                 setIsCreateStaffOpen(true);
               }}
               className="w-full sm:w-auto px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-sm font-semibold shadow-xs flex items-center justify-center gap-2 transition-colors"
             >
               <UserPlus className="w-4 h-4" />
-              Add Fee Staff
+              Add Fee Staff / Librarian
             </button>
           </div>
 
@@ -456,7 +465,7 @@ export const UsersView: React.FC = () => {
                 {filteredStaff.length === 0 ? (
                   <tr>
                     <td colSpan={6} className="py-8 text-center text-slate-500">
-                      No Fee Staff accounts found.
+                      No staff accounts found.
                     </td>
                   </tr>
                 ) : (
@@ -806,14 +815,14 @@ export const UsersView: React.FC = () => {
         </div>
       )}
 
-      {/* MODAL: CREATE FEE STAFF */}
+      {/* MODAL: CREATE STAFF MEMBER */}
       {isCreateStaffOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4">
           <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-150">
             <div className="p-5 border-b border-slate-200 flex items-center justify-between bg-slate-50">
               <h3 className="font-bold text-slate-800 text-base flex items-center gap-2">
                 <UserPlus className="w-5 h-5 text-indigo-600" />
-                Add Fee Staff Member
+                Add {createStaffForm.role === 'LIBRARIAN' ? 'Librarian' : 'Fee Staff'} Member
               </h3>
               <button onClick={() => setIsCreateStaffOpen(false)} className="text-slate-400 hover:text-slate-600">
                 <X className="w-5 h-5" />
@@ -830,12 +839,36 @@ export const UsersView: React.FC = () => {
 
               <div>
                 <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">
+                  Staff Role *
+                </label>
+                <select
+                  value={createStaffForm.role}
+                  onChange={(e) =>
+                    setCreateStaffForm({
+                      ...createStaffForm,
+                      role: e.target.value as 'FEE_STAFF' | 'LIBRARIAN',
+                    })
+                  }
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
+                >
+                  <option value="FEE_STAFF">Fee Staff</option>
+                  <option value="LIBRARIAN">Librarian</option>
+                </select>
+                <p className="mt-1 text-xs text-slate-500">
+                  {createStaffForm.role === 'LIBRARIAN'
+                    ? 'Manages school book catalogue, copies inventory, desk circulation, and library fines.'
+                    : 'Manages student fee structures, tuition invoices, collection ledgers, and receipts.'}
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">
                   Full Name *
                 </label>
                 <input
                   type="text"
                   required
-                  placeholder="e.g. Jane Accountant"
+                  placeholder={createStaffForm.role === 'LIBRARIAN' ? 'e.g. John Librarian' : 'e.g. Jane Accountant'}
                   value={createStaffForm.name}
                   onChange={(e) => setCreateStaffForm({ ...createStaffForm, name: e.target.value })}
                   className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"

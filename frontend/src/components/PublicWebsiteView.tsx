@@ -18,7 +18,7 @@ export const PublicWebsiteView: React.FC = () => {
   const isDark = themeContext?.theme === 'dark';
 
   // Role Tab Switching state
-  const [activeRole, setActiveRole] = useState<'super-admin' | 'school-admin' | 'fee-staff' | 'student' | 'parent'>('super-admin');
+  const [activeRole, setActiveRole] = useState<'school-admin' | 'fee-staff' | 'student' | 'parent'>('school-admin');
 
   // FAQ Accordion state
   const [openFaq, setOpenFaq] = useState<number | null>(0);
@@ -415,7 +415,7 @@ export const PublicWebsiteView: React.FC = () => {
             </p>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {/* Feature 1: Fee Management */}
             <div className="bg-surface-container-low rounded-2xl border border-outline-variant/40 p-6 flex flex-col justify-between hover:border-primary-container/50 hover:shadow-md transition-all group">
               <div>
@@ -462,7 +462,30 @@ export const PublicWebsiteView: React.FC = () => {
               </div>
             </div>
 
-            {/* Feature 3: Academic Setup */}
+            {/* Feature 3: Live Examination System */}
+            <div className="bg-surface-container-low rounded-2xl border border-outline-variant/40 p-6 flex flex-col justify-between hover:border-primary-container/50 hover:shadow-md transition-all group">
+              <div>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="p-3 bg-blue-50 text-blue-600 rounded-xl border border-blue-100">
+                    <span className="material-symbols-outlined text-[24px]">assignment</span>
+                  </div>
+                  <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800">
+                    Live
+                  </span>
+                </div>
+                <h3 className="text-base font-bold text-on-surface group-hover:text-primary-container transition-colors">
+                  Live Examinations
+                </h3>
+                <p className="text-xs text-secondary mt-2 leading-relaxed">
+                  Structured online assessments with preflight device checks, clear instructions, autosaved responses, recorded integrity events for teacher review, and published result scorecards.
+                </p>
+              </div>
+              <div className="mt-6 pt-4 border-t border-outline-variant/30 text-xs font-semibold text-emerald-700 flex items-center gap-1">
+                <span>Fully Operational</span>
+              </div>
+            </div>
+
+            {/* Feature 4: Academic Setup */}
             <div className="bg-surface-container-low rounded-2xl border border-outline-variant/40 p-6 flex flex-col justify-between hover:border-primary-container/50 hover:shadow-md transition-all group">
               <div>
                 <div className="flex items-center justify-between mb-4">
@@ -485,7 +508,7 @@ export const PublicWebsiteView: React.FC = () => {
               </div>
             </div>
 
-            {/* Feature 4: Platform Security */}
+            {/* Feature 5: Teacher & Staff Management */}
             <div className="bg-surface-container-low rounded-2xl border border-outline-variant/40 p-6 flex flex-col justify-between hover:border-primary-container/50 hover:shadow-md transition-all group">
               <div>
                 <div className="flex items-center justify-between mb-4">
@@ -558,16 +581,6 @@ export const PublicWebsiteView: React.FC = () => {
           {/* Role Tabs */}
           <div className="flex flex-wrap items-center justify-center gap-2 mb-10" id="role-tab-buttons">
             <button
-              onClick={() => setActiveRole('super-admin')}
-              className={`px-4 py-2.5 rounded-xl font-semibold text-xs transition-all ${
-                activeRole === 'super-admin'
-                  ? 'bg-primary-container text-on-primary shadow-sm'
-                  : 'bg-surface-container-low text-secondary border border-outline-variant/40 hover:bg-surface-container'
-              }`}
-            >
-              Platform Super Admin
-            </button>
-            <button
               onClick={() => setActiveRole('school-admin')}
               className={`px-4 py-2.5 rounded-xl font-semibold text-xs transition-all ${
                 activeRole === 'school-admin'
@@ -611,51 +624,6 @@ export const PublicWebsiteView: React.FC = () => {
 
           {/* Role Content Panels */}
           <div className="bg-surface-container-low rounded-2xl border border-outline-variant/40 p-8 lg:p-10">
-            {activeRole === 'super-admin' && (
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-center">
-                <div className="space-y-4">
-                  <span className="px-3 py-1 rounded-full text-xs font-semibold bg-primary-fixed/40 text-primary-container">
-                    Multi-Tenant Governance
-                  </span>
-                  <h3 className="text-2xl font-bold text-on-surface">Platform Super Admin Workspace</h3>
-                  <p className="text-sm text-secondary leading-relaxed">
-                    Onboard new educational institutions, allocate tenant codes, govern active or suspended subscription states, monitor backend service health, and execute database backups with safety blocklists.
-                  </p>
-                  <ul className="space-y-2 text-xs text-on-surface-variant">
-                    <li className="flex items-center gap-2">
-                      <span className="material-symbols-outlined text-tertiary text-[18px]">check_circle</span>
-                      Instant school provisioning with isolated schema bindings.
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <span className="material-symbols-outlined text-tertiary text-[18px]">check_circle</span>
-                      Header tenant context switcher to inspect workspaces without credential overrides.
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <span className="material-symbols-outlined text-tertiary text-[18px]">check_circle</span>
-                      Deep health probes monitoring PostgreSQL pool and Redis responsiveness.
-                    </li>
-                  </ul>
-                </div>
-                <div className="bg-surface-container-lowest p-6 rounded-xl border border-outline-variant/30 space-y-3">
-                  <div className="text-xs font-bold text-secondary uppercase">Active School Directory</div>
-                  <div className="p-3 rounded-lg bg-surface-container-low border border-outline-variant/30 flex items-center justify-between">
-                    <div>
-                      <div className="font-bold text-sm text-on-surface">Greenwood International Academy</div>
-                      <div className="text-[11px] text-secondary">Code: SCH001 • 420 Students • Active</div>
-                    </div>
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">Active</span>
-                  </div>
-                  <div className="p-3 rounded-lg bg-surface-container-low border border-outline-variant/30 flex items-center justify-between">
-                    <div>
-                      <div className="font-bold text-sm text-on-surface">Starlight Valley School</div>
-                      <div className="text-[11px] text-secondary">Code: SCH002 • 310 Students • Active</div>
-                    </div>
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">Active</span>
-                  </div>
-                </div>
-              </div>
-            )}
-
             {activeRole === 'school-admin' && (
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-center">
                 <div className="space-y-4">
@@ -822,7 +790,7 @@ export const PublicWebsiteView: React.FC = () => {
               <span className="text-3xl font-black text-primary-container/20">01</span>
               <h3 className="text-base font-bold text-on-surface">Institutional Setup</h3>
               <p className="text-xs text-secondary leading-relaxed">
-                Super Admin creates school tenant, registers domain bindings, and defines academic sessions.
+                Configure institutional profile, define academic sessions, and establish grade structures.
               </p>
             </div>
 

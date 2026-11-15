@@ -1,4 +1,5 @@
-import { IsEmail, IsNotEmpty, IsString, Matches, MinLength } from 'class-validator';
+import { IsEmail, IsIn, IsNotEmpty, IsOptional, IsString, Matches, MinLength } from 'class-validator';
+import { UserRole } from '@prisma/client';
 
 export class CreateStaffDto {
   @IsNotEmpty()
@@ -17,4 +18,10 @@ export class CreateStaffDto {
     message: 'Password must contain at least one letter and one number',
   })
   password: string;
+
+  @IsOptional()
+  @IsIn([UserRole.FEE_STAFF, UserRole.LIBRARIAN], {
+    message: 'Staff role must be either FEE_STAFF or LIBRARIAN',
+  })
+  role?: UserRole;
 }

@@ -127,6 +127,17 @@ describe('UsersController (FEE-P2B)', () => {
       expect(() => rolesGuard.canActivate(context)).toThrow(/Access denied/);
     });
 
+    it('denies LIBRARIAN from accessing createStaff', () => {
+      const context: any = {
+        getHandler: () => controller.createStaff,
+        getClass: () => UsersController,
+        switchToHttp: () => ({
+          getRequest: () => ({ user: { role: UserRole.LIBRARIAN } }),
+        }),
+      };
+      expect(() => rolesGuard.canActivate(context)).toThrow(/Access denied/);
+    });
+
     it('denies STUDENT from accessing user management', () => {
       const context: any = {
         getHandler: () => controller.findAll,

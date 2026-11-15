@@ -20,6 +20,7 @@ enum UserRole {
   TEACHER
   STUDENT
   PARENT
+  LIBRARIAN
 }
 
 enum TeacherStatus {
@@ -276,6 +277,11 @@ model School {
   studentAssessmentProgressions   StudentAssessmentProgression[]
   assessmentViolationEvents       AssessmentViolationEvent[]
   examinationSetting              SchoolExaminationSetting?
+  books                           Book[]
+  bookCopies                      BookCopy[]
+  bookLoans                       BookLoan[]
+  libraryFines                    LibraryFine[]
+  librarySetting                  LibrarySetting?
 
   @@unique([id, defaultReceiptTemplateId])
   @@map("schools")
@@ -323,6 +329,10 @@ model User {
   markedAttendanceRecords          StudentAttendance[]      @relation("AttendanceMarkedByUser")
   updatedAttendanceRecords         StudentAttendance[]      @relation("AttendanceUpdatedByUser")
   attendanceCorrections            AttendanceCorrectionLog[] @relation("CorrectionChangedByUser")
+  issuedBookLoans                  BookLoan[]               @relation("LoanIssuedByUser")
+  returnedBookLoans                BookLoan[]               @relation("LoanReturnedByUser")
+  waivedLibraryFines               LibraryFine[]            @relation("LibraryFineWaivedBy")
+  collectedLibraryFines            LibraryFine[]            @relation("LibraryFineCollectedBy")
 
   @@unique([schoolId, email])
   @@index([schoolId])
@@ -463,6 +473,8 @@ model Student {
   assessmentResults     AssessmentResult[]
   assessmentProgressions StudentAssessmentProgression[]
   assessmentViolationEvents AssessmentViolationEvent[]
+  bookLoans             BookLoan[]
+  libraryFines          LibraryFine[]
 
   @@unique([schoolId, admissionNumber])
   @@unique([schoolId, id])
@@ -497,6 +509,8 @@ model Teacher {
   assignments TeacherAssignment[]
   authoredAssessments Assessment[]
   authoredChapters    AssessmentChapter[] @relation("AuthoredChapters")
+  bookLoans           BookLoan[]
+  libraryFines        LibraryFine[]
 
   @@unique([schoolId, employeeId])
   @@unique([schoolId, id])
@@ -2110,4 +2124,215 @@ model AuthAuditLog {
   @@index([schoolId, createdAt])
   @@map("auth_audit_logs")
 }
+
+// =============================================================
+// PHASE: LIBRARY MANAGEMENT SYSTEM (LMS)
+// =============================================================
+
+enum BookCopyCondition {
+  NEW
+  GOOD
+  FAIR
+  DAMAGED
+  LOST
+  RETIRED
+}
+
+enum BookCopyStatus {
+  AVAILABLE
+  ISSUED
+  RESERVED
+  MAINTENANCE
+  LOST
+  RETIRED
+}
+
+enum LoanStatus {
+  ACTIVE
+  RETURNED
+  OVERDUE
+  LOST
+}
+
+enum BorrowerType {
+  STUDENT
+  TEACHER
+  STAFF
+}
+
+enum LibraryFineStatus {
+  PENDING
+  PAID
+  PARTIALLY_PAID
+  WAIVED
+}
+
+enum LibraryFineReason {
+  OVERDUE
+  DAMAGED_ITEM
+  LOST_ITEM
+}
+
+// -------------------------------------------------------------
+// 1. Book Catalogue
+// -------------------------------------------------------------
+model Book {
+  id              String   @id @default(uuid())
+  schoolId        String
+  title           String
+  author          String
+  isbn            String?
+  publisher       String?
+  category        String
+  edition         String?
+  publicationYear Int?
+  language        String   @default("English")
+  description     String?  @db.Text
+  totalCopies     Int      @default(0)
+  availableCopies Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  school School     @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  copies BookCopy[]
+
+  @@unique([schoolId, id])
+  @@index([schoolId, title])
+  @@index([schoolId, author])
+  @@index([schoolId, isbn])
+  @@index([schoolId, category])
+  @@map("books")
+}
+
+// -------------------------------------------------------------
+// 2. Physical Inventory & Copies
+// -------------------------------------------------------------
+model BookCopy {
+  id              String            @id @default(uuid())
+  schoolId        String
+  bookId          String
+  accessionNumber String
+  barcode         String?
+  rackLocation    String?
+  shelfLocation   String?
+  condition       BookCopyCondition @default(GOOD)
+  status          BookCopyStatus    @default(AVAILABLE)
+  acquiredDate    DateTime?         @default(now())
+  purchasePrice   Decimal?          @db.Decimal(10, 2)
+  notes           String?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  school School     @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  book   Book       @relation(fields: [schoolId, bookId], references: [schoolId, id], onDelete: Cascade)
+  loans  BookLoan[]
+
+  @@unique([schoolId, accessionNumber])
+  @@unique([schoolId, id])
+  @@index([schoolId, bookId])
+  @@index([schoolId, status])
+  @@index([schoolId, barcode])
+  @@map("book_copies")
+}
+
+// -------------------------------------------------------------
+// 3. Circulation & Loan Lifecycle
+// -------------------------------------------------------------
+model BookLoan {
+  id               String       @id @default(uuid())
+  schoolId         String
+  copyId           String
+  borrowerType     BorrowerType @default(STUDENT)
+  studentId        String?
+  teacherId        String?
+  issuedByUserId   String
+  issuedAt         DateTime     @default(now())
+  dueDate          DateTime
+  returnedAt       DateTime?
+  returnedByUserId String?
+  renewalCount     Int          @default(0)
+  status           LoanStatus   @default(ACTIVE)
+  notes            String?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  school         School        @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  copy           BookCopy      @relation(fields: [schoolId, copyId], references: [schoolId, id], onDelete: Restrict)
+  student        Student?      @relation(fields: [schoolId, studentId], references: [schoolId, id], onDelete: Restrict)
+  teacher        Teacher?      @relation(fields: [schoolId, teacherId], references: [schoolId, id], onDelete: Restrict)
+  issuedByUser   User          @relation("LoanIssuedByUser", fields: [issuedByUserId], references: [id])
+  returnedByUser User?         @relation("LoanReturnedByUser", fields: [returnedByUserId], references: [id])
+  fine           LibraryFine?
+
+  @@unique([schoolId, id])
+  @@index([schoolId, copyId])
+  @@index([schoolId, studentId, status])
+  @@index([schoolId, teacherId, status])
+  @@index([schoolId, dueDate, status])
+  @@map("book_loans")
+}
+
+// -------------------------------------------------------------
+// 4. Distinct Library Fines (Isolated from Fee Ledger)
+// -------------------------------------------------------------
+model LibraryFine {
+  id                String            @id @default(uuid())
+  schoolId          String
+  loanId            String            @unique
+  borrowerType      BorrowerType      @default(STUDENT)
+  studentId         String?
+  teacherId         String?
+  reason            LibraryFineReason @default(OVERDUE)
+  overdueDays       Int               @default(0)
+  fineAmount        Decimal           @db.Decimal(10, 2)
+  paidAmount        Decimal           @default(0.00) @db.Decimal(10, 2)
+  waivedAmount      Decimal           @default(0.00) @db.Decimal(10, 2)
+  status            LibraryFineStatus @default(PENDING)
+  waiveReason       String?
+  waivedByUserId    String?
+  collectedByUserId String?
+  paymentReference  String?
+  assessedAt        DateTime          @default(now())
+  resolvedAt        DateTime?
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  school          School   @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  loan            BookLoan @relation(fields: [schoolId, loanId], references: [schoolId, id], onDelete: Cascade)
+  student         Student? @relation(fields: [schoolId, studentId], references: [schoolId, id], onDelete: Restrict)
+  teacher         Teacher? @relation(fields: [schoolId, teacherId], references: [schoolId, id], onDelete: Restrict)
+  waivedByUser    User?    @relation("LibraryFineWaivedBy", fields: [waivedByUserId], references: [id])
+  collectedByUser User?    @relation("LibraryFineCollectedBy", fields: [collectedByUserId], references: [id])
+
+  @@unique([schoolId, id])
+  @@unique([schoolId, loanId])
+  @@index([schoolId, status])
+  @@index([schoolId, studentId])
+  @@index([schoolId, teacherId])
+  @@map("library_fines")
+}
+
+// -------------------------------------------------------------
+// 5. School-Level Library Configuration
+// -------------------------------------------------------------
+model LibrarySetting {
+  id                      String   @id @default(uuid())
+  schoolId                String   @unique
+  maxBooksStudent         Int      @default(3)
+  maxBooksTeacher         Int      @default(10)
+  loanDurationDaysStudent Int      @default(14)
+  loanDurationDaysTeacher Int      @default(30)
+  maxRenewals             Int      @default(2)
+  finePerDay              Decimal  @default(2.00) @db.Decimal(10, 2)
+  gracePeriodDays         Int      @default(2)
+  allowRenewWithOverdue   Boolean  @default(false)
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  school School @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+
+  @@unique([schoolId, id])
+  @@map("library_settings")
+}
+
 

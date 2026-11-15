@@ -28,6 +28,8 @@ import { StudentsManagementView } from './components/StudentsManagementView';
 import { TeachersManagementView } from './components/TeachersManagementView';
 import { AttendanceManagementWorkspace } from './components/AttendanceManagementWorkspace';
 import { ExaminationWorkspace } from './components/ExaminationWorkspace';
+import { LibraryManagementWorkspace } from './components/LibraryManagementWorkspace';
+import { StudentLibraryPortal } from './components/StudentLibraryPortal';
 import { MainLauncherDashboard } from './components/MainLauncherDashboard';
 import { PublicWebsiteView } from './components/PublicWebsiteView';
 import { LoginView } from './components/LoginView';
@@ -55,6 +57,7 @@ import {
   GraduationCap,
   Lock,
   Bell,
+  Library,
 } from 'lucide-react';
 
 export type ActiveFeeTab =
@@ -660,6 +663,123 @@ export { AttendanceManagementWorkspace } from './components/AttendanceManagement
 export { ExaminationWorkspace } from './components/ExaminationWorkspace';
 
 // =========================================================================
+// Library Management / Student Portal Workspace
+// =========================================================================
+export const LibraryWorkspaceRouter: React.FC = () => {
+  const navigate = useNavigate();
+  const { user } = useAuth();
+
+  // Strictly exclude PARENT role
+  if (user?.role === UserRole.PARENT) {
+    return (
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-8 text-center max-w-lg mx-auto my-12 shadow-sm">
+        <div className="w-12 h-12 bg-rose-50 dark:bg-rose-900/30 text-rose-600 dark:text-rose-400 rounded-full flex items-center justify-center mx-auto mb-4">
+          <Lock className="w-6 h-6" />
+        </div>
+        <h3 className="text-lg font-bold text-slate-800 dark:text-slate-100">Access Restricted</h3>
+        <p className="text-xs text-slate-500 dark:text-slate-400 mt-2">
+          The School Library Management System is restricted to students and authorized library staff. Parent accounts do not have access to library services.
+        </p>
+        <button
+          onClick={() => navigate('/app')}
+          className="mt-6 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-semibold transition"
+        >
+          ← Return to System Launcher
+        </button>
+      </div>
+    );
+  }
+
+  // If user is STUDENT, show the StudentLibraryPortal
+  if (user?.role === UserRole.STUDENT) {
+    return (
+      <div className="space-y-6">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white dark:bg-slate-900 p-3.5 sm:p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs">
+          <div className="flex items-center gap-2 min-w-0 flex-1">
+            <div className="p-2 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 rounded-xl border border-indigo-100 dark:border-indigo-800 shrink-0">
+              <Library className="w-5 h-5" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <h2 className="text-sm sm:text-base font-bold text-slate-900 dark:text-slate-100 tracking-tight leading-tight truncate">
+                Student Library Portal
+              </h2>
+              <span className="text-[10px] sm:text-[11px] text-slate-600 dark:text-slate-400 font-medium truncate block">
+                Catalogue search, personal loans, return countdowns, and library desk fines
+              </span>
+            </div>
+          </div>
+
+          <button
+            onClick={() => navigate('/app')}
+            className="text-xs font-semibold text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 transition-colors self-end sm:self-auto shrink-0"
+          >
+            System Launcher →
+          </button>
+        </div>
+
+        <StudentLibraryPortal />
+      </div>
+    );
+  }
+
+  // If user is LIBRARIAN, SCHOOL_ADMIN, or PLATFORM_SUPER_ADMIN, show LibraryManagementWorkspace
+  const isAuthorizedStaff =
+    user?.role === UserRole.LIBRARIAN ||
+    user?.role === UserRole.SCHOOL_ADMIN ||
+    user?.role === UserRole.PLATFORM_SUPER_ADMIN;
+
+  if (isAuthorizedStaff) {
+    return (
+      <div className="space-y-6">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white dark:bg-slate-900 p-3.5 sm:p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs">
+          <div className="flex items-center gap-2 min-w-0 flex-1">
+            <div className="p-2 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 rounded-xl border border-indigo-100 dark:border-indigo-800 shrink-0">
+              <Library className="w-5 h-5" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <h2 className="text-sm sm:text-base font-bold text-slate-900 dark:text-slate-100 tracking-tight leading-tight truncate">
+                Library Management Workspace
+              </h2>
+              <span className="text-[10px] sm:text-[11px] text-slate-600 dark:text-slate-400 font-medium truncate block">
+                Circulation desk, book inventory, loan tracking, desk fines, and lending policies
+              </span>
+            </div>
+          </div>
+
+          <button
+            onClick={() => navigate('/app')}
+            className="text-xs font-semibold text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 transition-colors self-end sm:self-auto shrink-0"
+          >
+            System Launcher →
+          </button>
+        </div>
+
+        <LibraryManagementWorkspace />
+      </div>
+    );
+  }
+
+  // Any other role (e.g. TEACHER if not granted library staff)
+  return (
+    <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-8 text-center max-w-lg mx-auto my-12 shadow-sm">
+      <div className="w-12 h-12 bg-amber-50 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 rounded-full flex items-center justify-center mx-auto mb-4">
+        <Lock className="w-6 h-6" />
+      </div>
+      <h3 className="text-lg font-bold text-slate-800 dark:text-slate-100">Access Restricted</h3>
+      <p className="text-xs text-slate-500 dark:text-slate-400 mt-2">
+        You do not have permission to access the Library Management System. Please contact your school administrator.
+      </p>
+      <button
+        onClick={() => navigate('/app')}
+        className="mt-6 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-semibold transition"
+      >
+        ← Return to System Launcher
+      </button>
+    </div>
+  );
+};
+
+// =========================================================================
 // 7. ERP Workspace Shell (Protected Shell for /app/*)
 // =========================================================================
 export const ERPWorkspaceShell: React.FC = () => {
@@ -736,6 +856,14 @@ export const ERPWorkspaceShell: React.FC = () => {
               element={
                 <TenantContextGate moduleName="Notifications & Communications" moduleDescription="Institutional email notification preferences, delivery audit logs, and communication channels require an active school tenant.">
                   <NotificationManagementWorkspace />
+                </TenantContextGate>
+              }
+            />
+            <Route
+              path="library/*"
+              element={
+                <TenantContextGate moduleName="Library Management" moduleDescription="Catalogue management, circulation desk, loan records, and library desk fines require an active school tenant.">
+                  <LibraryWorkspaceRouter />
                 </TenantContextGate>
               }
             />

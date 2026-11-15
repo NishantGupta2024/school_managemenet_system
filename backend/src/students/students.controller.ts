@@ -54,7 +54,12 @@ export class StudentsController {
   }
 
   @Get()
-  @Roles(UserRole.PLATFORM_SUPER_ADMIN, UserRole.SCHOOL_ADMIN, UserRole.FEE_STAFF)
+  @Roles(
+    UserRole.PLATFORM_SUPER_ADMIN,
+    UserRole.SCHOOL_ADMIN,
+    UserRole.FEE_STAFF,
+    UserRole.LIBRARIAN,
+  )
   async findAll(@Request() req: any, @Query() query: QueryStudentsDto) {
     const schoolId = req.school.id;
     return this.studentsService.findStudents(schoolId, query);

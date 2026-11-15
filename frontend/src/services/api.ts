@@ -27,6 +27,7 @@ export const UserRole = {
   STUDENT: 'STUDENT',
   PARENT: 'PARENT',
   TEACHER: 'TEACHER',
+  LIBRARIAN: 'LIBRARIAN',
 } as const;
 
 export type UserRole = (typeof UserRole)[keyof typeof UserRole];
@@ -2471,7 +2472,12 @@ export const usersApi = {
     const res = await api.get<UserProfile>('/users/me');
     return res.data;
   },
-  createStaff: async (payload: { name: string; email: string; password: string }): Promise<UserProfile> => {
+  createStaff: async (payload: {
+    name: string;
+    email: string;
+    password: string;
+    role?: 'FEE_STAFF' | 'LIBRARIAN';
+  }): Promise<UserProfile> => {
     const res = await api.post<UserProfile>('/users/staff', payload);
     return res.data;
   },

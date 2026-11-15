@@ -9,8 +9,7 @@ describe('Multipart Upload & Content-Type Interceptor Regression', () => {
   let lastReceivedBody: any;
 
   beforeAll(async () => {
-    const mod = 'node:http';
-    const http: any = await (Function('m', 'return import(m)')(mod));
+    const http: any = await import('node:http');
     const NodeBuffer = (globalThis as any).Buffer;
     lastReceivedBody = NodeBuffer.alloc(0);
 

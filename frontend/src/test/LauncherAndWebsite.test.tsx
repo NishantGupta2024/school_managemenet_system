@@ -25,6 +25,7 @@ vi.mock('../services/api', () => {
       STUDENT: 'STUDENT',
       PARENT: 'PARENT',
       TEACHER: 'TEACHER',
+      LIBRARIAN: 'LIBRARIAN',
     },
     setActiveSchoolId: vi.fn(),
     setOnUnauthorized: vi.fn(),
@@ -141,6 +142,24 @@ vi.mock('../services/api', () => {
     getMyTeacherProfile: vi.fn(),
   };
 });
+
+vi.mock('../services/library.api', () => ({
+  libraryApi: {
+    getSettings: vi.fn().mockResolvedValue({
+      schoolId: '00000000-0000-0000-0000-000000000001',
+      maxBooksPerStudent: 3,
+      maxBooksPerTeacher: 10,
+      studentLoanPeriodDays: 14,
+      teacherLoanPeriodDays: 30,
+      finePerDay: '1.00',
+      allowRenewals: true,
+      maxRenewals: 2,
+    }),
+    getBooks: vi.fn().mockResolvedValue({ books: [], total: 0 }),
+    getLoans: vi.fn().mockResolvedValue({ loans: [], total: 0 }),
+    getFines: vi.fn().mockResolvedValue({ fines: [], total: 0 }),
+  },
+}));
 
 describe('Unified School ERP: Public Website & System Launcher Navigation', () => {
   beforeEach(() => {
@@ -285,21 +304,21 @@ describe('Unified School ERP: Public Website & System Launcher Navigation', () =
         expect(screen.getByText('User Accounts & Access')).toBeInTheDocument();
       });
 
-      // Verify roadmap preview modal trigger on Library roadmap module
+      // Verify launching Library Management operational module
       const libraryCard = screen.getByRole('button', { name: /Launch Library Management/i });
       fireEvent.click(libraryCard);
 
       await waitFor(() => {
-        expect(screen.getByText(/Roadmap Module Preview/i)).toBeInTheDocument();
-        expect(screen.getByText(/Phase 5: Library Cataloging & Overdue Ledger/i)).toBeInTheDocument();
+        expect(screen.getAllByText('Library Management Workspace').length).toBeGreaterThanOrEqual(1);
+        expect(screen.getAllByText(/System Launcher →/i).length).toBeGreaterThanOrEqual(1);
       });
 
-      // Close modal
-      const closeBtn = screen.getByRole('button', { name: /Close Preview/i });
-      fireEvent.click(closeBtn);
+      // Click "System Launcher →" to return back to launcher
+      const backBtns = screen.getAllByRole('button', { name: /System Launcher →/i });
+      fireEvent.click(backBtns[0]);
 
       await waitFor(() => {
-        expect(screen.queryByText(/Roadmap Module Preview/i)).not.toBeInTheDocument();
+        expect(screen.getByText('Fee Management')).toBeInTheDocument();
       });
     });
 

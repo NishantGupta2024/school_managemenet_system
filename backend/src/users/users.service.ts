@@ -121,8 +121,8 @@ export class UsersService {
   }
 
   /**
-   * School Admin provisions a new Fee Staff account in their own school.
-   * Role is hardcoded to FEE_STAFF; client cannot escalate privileges.
+   * School Admin provisions a new Fee Staff or Librarian account in their own school.
+   * Role is restricted to FEE_STAFF or LIBRARIAN; client cannot escalate privileges.
    */
   async createStaff(schoolId: string, dto: CreateStaffDto) {
     const normalizedEmail = dto.email.trim().toLowerCase();
@@ -140,6 +140,14 @@ export class UsersService {
       );
     }
 
+    const allowedStaffRoles: UserRole[] = [UserRole.FEE_STAFF, UserRole.LIBRARIAN];
+    const targetRole = dto.role || UserRole.FEE_STAFF;
+    if (!allowedStaffRoles.includes(targetRole)) {
+      throw new BadRequestException(
+        `Invalid staff role. Permitted staff roles are: ${allowedStaffRoles.join(', ')}`,
+      );
+    }
+
     const passwordHash = await bcrypt.hash(dto.password, 10);
 
     return this.prisma.user.create({
@@ -147,7 +155,7 @@ export class UsersService {
         name: dto.name.trim(),
         email: normalizedEmail,
         passwordHash,
-        role: UserRole.FEE_STAFF,
+        role: targetRole,
         schoolId,
         status: UserStatus.ACTIVE,
       },

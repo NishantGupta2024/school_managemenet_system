@@ -96,6 +96,8 @@ export const Header: React.FC = () => {
         return 'Super Admin';
       case 'SCHOOL_ADMIN':
         return 'School Admin';
+      case 'LIBRARIAN':
+        return 'Librarian';
       case 'FEE_STAFF':
         return 'Fee Staff';
       case 'STUDENT':

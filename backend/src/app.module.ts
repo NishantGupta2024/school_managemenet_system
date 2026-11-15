@@ -26,6 +26,7 @@ import { TeachersModule } from './teachers/teachers.module';
 import { AttendanceModule } from './attendance/attendance.module';
 import { ExaminationModule } from './examination/examination.module';
 import { BackupModule } from './backup/backup.module';
+import { LibraryModule } from './library/library.module';
 
 @Module({
   imports: [
@@ -65,6 +66,7 @@ import { BackupModule } from './backup/backup.module';
     ReportsModule,
     ReceiptTemplatesModule,
     BackupModule,
+    LibraryModule,
   ],
   providers: [
     {

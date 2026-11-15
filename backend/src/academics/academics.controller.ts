@@ -99,6 +99,7 @@ export class AcademicsController {
     UserRole.TEACHER,
     UserRole.STUDENT,
     UserRole.PARENT,
+    UserRole.LIBRARIAN,
   )
   async getGrades(@Request() req: any) {
     const schoolId = req.school.id;

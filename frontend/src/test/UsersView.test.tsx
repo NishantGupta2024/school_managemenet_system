@@ -184,6 +184,61 @@ describe('UsersView Component (FEE-P2B)', () => {
     });
   });
 
+  it('successfully creates a Librarian staff account when Librarian role is selected', async () => {
+    (usersApi.createStaff as any).mockResolvedValueOnce({
+      id: 'staff-lib-1',
+      name: 'John Librarian',
+      email: 'john.librarian@greenwood.edu',
+      role: 'LIBRARIAN',
+      status: 'ACTIVE',
+    });
+
+    renderComponent();
+
+    await waitFor(() => {
+      expect(screen.getByText('Jane Accountant')).toBeInTheDocument();
+    });
+
+    const addBtn = screen.getByRole('button', { name: /Add Fee Staff/i });
+    fireEvent.click(addBtn);
+
+    await waitFor(() => {
+      expect(screen.getByText('Add Fee Staff Member')).toBeInTheDocument();
+    });
+
+    // Select LIBRARIAN role
+    const roleSelect = screen.getByRole('combobox');
+    fireEvent.change(roleSelect, { target: { value: 'LIBRARIAN' } });
+
+    await waitFor(() => {
+      expect(screen.getByText('Add Librarian Member')).toBeInTheDocument();
+    });
+
+    fireEvent.change(screen.getByPlaceholderText(/e\.g\. John Librarian/i), {
+      target: { value: 'John Librarian' },
+    });
+    fireEvent.change(screen.getByPlaceholderText(/staff@school\.edu/i), {
+      target: { value: 'john.librarian@greenwood.edu' },
+    });
+    fireEvent.change(screen.getByPlaceholderText(/Min 8 characters, letter & number/i), {
+      target: { value: 'LibPassword123!' },
+    });
+
+    const submitBtn = screen.getByRole('button', { name: /Confirm Create Staff/i });
+    fireEvent.click(submitBtn);
+
+    await waitFor(() => {
+      expect(usersApi.createStaff).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: 'John Librarian',
+          email: 'john.librarian@greenwood.edu',
+          password: 'LibPassword123!',
+          role: 'LIBRARIAN',
+        }),
+      );
+    });
+  });
+
   it('navigates to Student Accounts tab and provisions student login', async () => {
     (usersApi.provisionStudentAccount as any).mockResolvedValueOnce({
       message: 'Student account successfully provisioned and linked',

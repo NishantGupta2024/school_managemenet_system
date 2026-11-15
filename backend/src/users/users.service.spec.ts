@@ -113,6 +113,69 @@ describe('UsersService (FEE-P2B)', () => {
       );
     });
 
+    it('creates LIBRARIAN user in school when role is set to LIBRARIAN', async () => {
+      mockPrisma.user.findFirst.mockResolvedValue(null);
+      mockPrisma.user.create.mockResolvedValue({
+        id: 'new-librarian-id',
+        schoolId: schoolAId,
+        name: 'John Librarian',
+        email: 'john.librarian@school.edu',
+        role: UserRole.LIBRARIAN,
+        status: UserStatus.ACTIVE,
+      });
+
+      const result = await service.createStaff(schoolAId, {
+        name: 'John Librarian',
+        email: 'John.Librarian@School.edu',
+        password: 'SecurePassword123!',
+        role: UserRole.LIBRARIAN,
+      });
+
+      expect(result.id).toBe('new-librarian-id');
+      expect(result.role).toBe(UserRole.LIBRARIAN);
+      expect(mockPrisma.user.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            schoolId: schoolAId,
+            email: 'john.librarian@school.edu',
+            role: UserRole.LIBRARIAN,
+            status: UserStatus.ACTIVE,
+          }),
+        }),
+      );
+    });
+
+    it('strictly rejects creation with disallowed roles (e.g. SCHOOL_ADMIN, TEACHER, PARENT)', async () => {
+      mockPrisma.user.findFirst.mockResolvedValue(null);
+
+      await expect(
+        service.createStaff(schoolAId, {
+          name: 'Hacker',
+          email: 'hacker@school.edu',
+          password: 'SecurePassword123!',
+          role: UserRole.SCHOOL_ADMIN as any,
+        }),
+      ).rejects.toThrow(BadRequestException);
+
+      await expect(
+        service.createStaff(schoolAId, {
+          name: 'Hacker Super',
+          email: 'super@school.edu',
+          password: 'SecurePassword123!',
+          role: UserRole.PLATFORM_SUPER_ADMIN as any,
+        }),
+      ).rejects.toThrow(BadRequestException);
+
+      await expect(
+        service.createStaff(schoolAId, {
+          name: 'Parent Hack',
+          email: 'parent@school.edu',
+          password: 'SecurePassword123!',
+          role: UserRole.PARENT as any,
+        }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
     it('rejects if email already registered in school', async () => {
       mockPrisma.user.findFirst.mockResolvedValue({ id: 'existing' });
 
