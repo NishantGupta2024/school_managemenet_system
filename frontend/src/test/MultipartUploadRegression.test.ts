@@ -9,6 +9,7 @@ describe('Multipart Upload & Content-Type Interceptor Regression', () => {
   let lastReceivedBody: any;
 
   beforeAll(async () => {
+    // @ts-expect-error Node types omitted in browser tsconfig
     const http: any = await import('node:http');
     const NodeBuffer = (globalThis as any).Buffer;
     lastReceivedBody = NodeBuffer.alloc(0);
