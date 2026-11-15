@@ -33,6 +33,7 @@ import {
   Smartphone,
 } from 'lucide-react';
 import { ExaminationLeaderboardModal } from './ExaminationLeaderboardModal';
+import { useOptionalTheme } from '../context/ThemeContext';
 import faceDetectionService, { CameraDeviceInfo } from '../services/faceDetection.service';
 import objectDetectionService from '../services/objectDetection.service';
 import audioMonitoringService from '../services/audioMonitoring.service';
@@ -224,8 +225,22 @@ type PortalView = 'DASHBOARD' | 'INSTRUCTIONS' | 'PREFLIGHT' | 'RUNNER' | 'COMPL
 // =============================================================================
 
 export const StudentExaminationPortal: React.FC = () => {
+  const themeContext = useOptionalTheme();
+
   // Navigation / View State
   const [currentView, setCurrentView] = useState<PortalView>('DASHBOARD');
+
+  // Defer theme changes during active examination runner
+  useEffect(() => {
+    if (themeContext) {
+      themeContext.setExamActive(currentView === 'RUNNER');
+    }
+    return () => {
+      if (themeContext) {
+        themeContext.setExamActive(false);
+      }
+    };
+  }, [currentView, themeContext]);
 
   // Assessments and Filter State
   const [assessments, setAssessments] = useState<StudentAssessmentOverview[]>([]);

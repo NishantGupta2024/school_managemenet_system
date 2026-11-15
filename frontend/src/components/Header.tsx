@@ -13,8 +13,10 @@ import {
   X,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { useOptionalTheme } from '../context/ThemeContext';
 import { UserRole, SchoolRecord } from '../services/api';
 import { CymbixLogo } from './CymbixLogo';
+import { ThemeToggle } from './ThemeToggle';
 
 export const Header: React.FC = () => {
   let authContext: ReturnType<typeof useAuth> | null = null;
@@ -26,6 +28,8 @@ export const Header: React.FC = () => {
 
   const navigate = useNavigate();
   const location = useLocation();
+  const themeContext = useOptionalTheme();
+  const isDark = themeContext?.theme === 'dark';
 
   const user = authContext?.user;
   const logout = authContext?.logout;
@@ -143,7 +147,7 @@ export const Header: React.FC = () => {
   const isInsideModule = location.pathname.startsWith('/app/') && location.pathname !== '/app';
 
   return (
-    <header className="bg-white border-b border-slate-200 px-2.5 sm:px-6 h-16 sm:h-[88px] lg:h-24 sticky top-0 z-30 flex items-center">
+    <header className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-2.5 sm:px-6 h-16 sm:h-[88px] lg:h-24 sticky top-0 z-30 flex items-center transition-colors">
       <div className="max-w-7xl mx-auto flex items-center justify-between gap-2 sm:gap-4 w-full">
         {/* Left: Branding & Module Switcher */}
         <div className="flex items-center space-x-1.5 sm:space-x-3 shrink-0">
@@ -152,7 +156,7 @@ export const Header: React.FC = () => {
             className="cursor-pointer transition-opacity hover:opacity-90 flex items-center"
             title="Return to System Launcher"
           >
-            <CymbixLogo className="!h-8 sm:!h-16 lg:!h-[72px]" />
+            <CymbixLogo variant={isDark ? 'dark' : 'light'} className="!h-8 sm:!h-16 lg:!h-[72px]" />
             <span className="sr-only">School ERP</span>
           </div>
           {isInsideModule && (
@@ -434,7 +438,10 @@ export const Header: React.FC = () => {
             </div>
           )}
 
-          {/* 3. User Profile Badge & Logout */}
+          {/* 3. Theme Toggle */}
+          <ThemeToggle />
+
+          {/* 4. User Profile Badge & Logout */}
           {user && (
             <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
               <div className="flex items-center gap-1.5 sm:gap-2 bg-slate-50 border border-slate-200 py-1.5 px-2 sm:px-3 rounded-xl">

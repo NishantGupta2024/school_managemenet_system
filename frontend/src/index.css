@@ -8,7 +8,7 @@
 
 html,
 body {
-  overflow-x: hidden;
+  overflow-x: clip;
   max-width: 100vw;
 }
 
@@ -21,3 +21,483 @@ body {
   scrollbar-width: none;
 }
 
+/* Base Light / Dark color-scheme declaration */
+html.dark {
+  color-scheme: dark;
+}
+
+html:not(.dark) {
+  color-scheme: light;
+}
+
+/* =========================================================================
+   LIGHT THEME EXACT BASELINE (Screenshot 1 Target)
+   Explicitly enforces pale gray canvas background and crisp original light
+   colors when Light mode is selected, preventing any dark background leaks.
+   ========================================================================= */
+
+html:not(.dark),
+html:not(.dark) body {
+  background-color: #f8fafc !important; /* slate-50 pale gray baseline */
+  color: #0f172a !important; /* slate-900 */
+}
+
+html:not(.dark) .bg-slate-50,
+html:not(.dark) [class*="bg-slate-50/"] {
+  background-color: #f8fafc !important;
+}
+
+html:not(.dark) .bg-white {
+  background-color: #ffffff !important;
+}
+
+html:not(.dark) .border-slate-200,
+html:not(.dark) [class*="border-slate-200/"] {
+  border-color: #e2e8f0 !important;
+}
+
+html:not(.dark) .border-slate-100 {
+  border-color: #f1f5f9 !important;
+}
+
+html:not(.dark) .text-slate-900 {
+  color: #0f172a !important;
+}
+
+html:not(.dark) .text-slate-800 {
+  color: #1e293b !important;
+}
+
+html:not(.dark) .text-slate-700 {
+  color: #334155 !important;
+}
+
+html:not(.dark) .text-slate-600 {
+  color: #475569 !important;
+}
+
+html:not(.dark) .text-slate-500 {
+  color: #64748b !important;
+}
+
+/* =========================================================================
+   COMPREHENSIVE DARK THEME OVERRIDES
+   All rules scoped strictly under html.dark to ensure Light mode remains
+   100% untouched and restores the exact original light appearance.
+   ========================================================================= */
+
+html.dark,
+html.dark body {
+  background-color: #020617 !important; /* slate-950 deep dark canvas */
+  color: #f1f5f9 !important; /* slate-100 */
+}
+
+/* 1. Core Background Surfaces & Containers */
+html.dark .bg-white,
+html.dark [class*="bg-white/"]:not([class*="bg-white/10"]):not([class*="bg-white/20"]) {
+  background-color: #0f172a !important; /* slate-900 */
+  color: #f8fafc;
+}
+
+html.dark .bg-slate-50,
+html.dark [class*="bg-slate-50/"] {
+  background-color: #0b0f19 !important; /* deep slate-950 */
+  color: #f1f5f9;
+}
+
+html.dark .bg-slate-100,
+html.dark [class*="bg-slate-100/"],
+html.dark .bg-zinc-100 {
+  background-color: #1e293b !important; /* slate-800 */
+  color: #e2e8f0;
+}
+
+html.dark .bg-slate-200,
+html.dark [class*="bg-slate-200/"],
+html.dark .bg-slate-300 {
+  background-color: #334155 !important; /* slate-700 */
+  color: #f1f5f9;
+}
+
+/* 2. Interactive Focus & Hover Backgrounds */
+html.dark [class*="focus:bg-white"]:focus {
+  background-color: #090d16 !important;
+  color: #f8fafc !important;
+}
+
+html.dark [class*="hover:bg-slate-50"]:hover,
+html.dark [class*="hover:bg-slate-100"]:hover,
+html.dark [class*="hover:bg-slate-200"]:hover,
+html.dark [class*="hover:bg-white"]:hover {
+  background-color: #1e293b !important;
+}
+
+/* 3. Tinted Badges, Status Indicators, and Cards */
+/* Indigo */
+html.dark .bg-indigo-50,
+html.dark [class*="bg-indigo-50/"],
+html.dark .bg-indigo-100,
+html.dark [class*="bg-indigo-100/"] {
+  background-color: rgba(99, 102, 241, 0.15) !important;
+}
+html.dark [class*="hover:bg-indigo-50"]:hover,
+html.dark [class*="hover:bg-indigo-100"]:hover {
+  background-color: rgba(99, 102, 241, 0.28) !important;
+}
+html.dark .border-indigo-100,
+html.dark .border-indigo-200,
+html.dark [class*="border-indigo-200/"],
+html.dark .border-indigo-300 {
+  border-color: rgba(99, 102, 241, 0.35) !important;
+}
+html.dark .text-indigo-600,
+html.dark .text-indigo-700,
+html.dark .text-indigo-800,
+html.dark .text-indigo-900,
+html.dark .text-indigo-950 {
+  color: #a5b4fc !important;
+}
+
+/* Emerald */
+html.dark .bg-emerald-50,
+html.dark [class*="bg-emerald-50/"],
+html.dark .bg-emerald-100,
+html.dark [class*="bg-emerald-100/"] {
+  background-color: rgba(16, 185, 129, 0.15) !important;
+}
+html.dark [class*="hover:bg-emerald-50"]:hover,
+html.dark [class*="hover:bg-emerald-100"]:hover {
+  background-color: rgba(16, 185, 129, 0.28) !important;
+}
+html.dark .border-emerald-100,
+html.dark .border-emerald-200,
+html.dark [class*="border-emerald-200/"],
+html.dark .border-emerald-300 {
+  border-color: rgba(16, 185, 129, 0.35) !important;
+}
+html.dark .text-emerald-600,
+html.dark .text-emerald-700,
+html.dark .text-emerald-800,
+html.dark .text-emerald-900,
+html.dark .text-emerald-950 {
+  color: #6ee7b7 !important;
+}
+
+/* Amber */
+html.dark .bg-amber-50,
+html.dark [class*="bg-amber-50/"],
+html.dark .bg-amber-100,
+html.dark [class*="bg-amber-100/"],
+html.dark .bg-orange-50 {
+  background-color: rgba(245, 158, 11, 0.15) !important;
+}
+html.dark [class*="hover:bg-amber-50"]:hover,
+html.dark [class*="hover:bg-amber-100"]:hover {
+  background-color: rgba(245, 158, 11, 0.28) !important;
+}
+html.dark .border-amber-100,
+html.dark .border-amber-200,
+html.dark [class*="border-amber-200/"],
+html.dark .border-amber-300,
+html.dark .border-orange-200 {
+  border-color: rgba(245, 158, 11, 0.35) !important;
+}
+html.dark .text-amber-600,
+html.dark .text-amber-700,
+html.dark .text-amber-800,
+html.dark .text-amber-900,
+html.dark .text-amber-950,
+html.dark .text-orange-700 {
+  color: #fcd34d !important;
+}
+
+/* Rose / Red */
+html.dark .bg-rose-50,
+html.dark [class*="bg-rose-50/"],
+html.dark .bg-rose-100,
+html.dark [class*="bg-rose-100/"],
+html.dark .bg-red-50,
+html.dark .bg-red-100 {
+  background-color: rgba(244, 63, 94, 0.15) !important;
+}
+html.dark [class*="hover:bg-rose-50"]:hover,
+html.dark [class*="hover:bg-rose-100"]:hover {
+  background-color: rgba(244, 63, 94, 0.28) !important;
+}
+html.dark .border-rose-100,
+html.dark .border-rose-200,
+html.dark .border-rose-300,
+html.dark .border-red-200 {
+  border-color: rgba(244, 63, 94, 0.35) !important;
+}
+html.dark .text-rose-600,
+html.dark .text-rose-700,
+html.dark .text-rose-800,
+html.dark .text-rose-900,
+html.dark .text-red-600,
+html.dark .text-red-700,
+html.dark .text-red-800 {
+  color: #fda4af !important;
+}
+
+/* Blue / Sky / Cyan */
+html.dark .bg-blue-50,
+html.dark [class*="bg-blue-50/"],
+html.dark .bg-blue-100,
+html.dark .bg-sky-50,
+html.dark .bg-sky-100,
+html.dark .bg-cyan-50,
+html.dark .bg-cyan-100 {
+  background-color: rgba(59, 130, 246, 0.15) !important;
+}
+html.dark [class*="hover:bg-blue-50"]:hover,
+html.dark [class*="hover:bg-blue-100"]:hover {
+  background-color: rgba(59, 130, 246, 0.28) !important;
+}
+html.dark .border-blue-100,
+html.dark .border-blue-200,
+html.dark .border-blue-300,
+html.dark .border-sky-200,
+html.dark .border-cyan-200 {
+  border-color: rgba(59, 130, 246, 0.35) !important;
+}
+html.dark .text-blue-600,
+html.dark .text-blue-700,
+html.dark .text-blue-800,
+html.dark .text-blue-900,
+html.dark .text-sky-700,
+html.dark .text-sky-800,
+html.dark .text-cyan-700,
+html.dark .text-cyan-800,
+html.dark .text-cyan-900 {
+  color: #93c5fd !important;
+}
+
+/* Purple */
+html.dark .bg-purple-50,
+html.dark [class*="bg-purple-50/"],
+html.dark .bg-purple-100,
+html.dark [class*="bg-purple-100/"] {
+  background-color: rgba(168, 85, 247, 0.15) !important;
+}
+html.dark [class*="hover:bg-purple-50"]:hover,
+html.dark [class*="hover:bg-purple-100"]:hover {
+  background-color: rgba(168, 85, 247, 0.28) !important;
+}
+html.dark .border-purple-100,
+html.dark .border-purple-200,
+html.dark .border-purple-300 {
+  border-color: rgba(168, 85, 247, 0.35) !important;
+}
+html.dark .text-purple-600,
+html.dark .text-purple-700,
+html.dark .text-purple-800,
+html.dark .text-purple-900 {
+  color: #d8b4fe !important;
+}
+
+/* Teal */
+html.dark .bg-teal-50,
+html.dark .bg-teal-100,
+html.dark [class*="bg-teal-100/"] {
+  background-color: rgba(20, 184, 166, 0.15) !important;
+}
+html.dark [class*="hover:bg-teal-50"]:hover,
+html.dark [class*="hover:bg-teal-100"]:hover {
+  background-color: rgba(20, 184, 166, 0.28) !important;
+}
+html.dark .border-teal-100,
+html.dark .border-teal-200 {
+  border-color: rgba(20, 184, 166, 0.35) !important;
+}
+html.dark .text-teal-600,
+html.dark .text-teal-700,
+html.dark .text-teal-800,
+html.dark .text-teal-900 {
+  color: #5eead4 !important;
+}
+
+/* 4. Borders & Dividers */
+html.dark .border-slate-100,
+html.dark .border-slate-200,
+html.dark [class*="border-slate-200/"],
+html.dark .border-slate-300,
+html.dark .border-zinc-200 {
+  border-color: #1e293b !important;
+}
+
+html.dark .divide-slate-100 > * + *,
+html.dark .divide-slate-200 > * + *,
+html.dark .divide-rose-100 > * + *,
+html.dark [class*="divide-outline-variant/"] > * + * {
+  border-color: #1e293b !important;
+}
+
+/* 5. Slate Typography & Readability */
+html.dark .text-slate-900,
+html.dark .text-slate-800 {
+  color: #f8fafc !important;
+}
+
+html.dark .text-slate-700,
+html.dark .text-slate-600 {
+  color: #cbd5e1 !important;
+}
+
+html.dark .text-slate-500 {
+  color: #94a3b8 !important;
+}
+
+html.dark .text-slate-400 {
+  color: #64748b !important;
+}
+
+html.dark [class*="hover:text-slate-900"]:hover,
+html.dark [class*="hover:text-slate-800"]:hover {
+  color: #ffffff !important;
+}
+
+/* 6. Form Controls, Inputs, Selects & Textareas */
+html.dark input:not([type="checkbox"]):not([type="radio"]):not([type="submit"]):not([type="button"]),
+html.dark select,
+html.dark textarea {
+  background-color: #090d16 !important;
+  border-color: #334155 !important;
+  color: #f8fafc !important;
+}
+
+html.dark select option {
+  background-color: #0f172a !important;
+  color: #f8fafc !important;
+}
+
+html.dark input::placeholder,
+html.dark textarea::placeholder {
+  color: #64748b !important;
+}
+
+html.dark input:focus,
+html.dark select:focus,
+html.dark textarea:focus {
+  border-color: #6366f1 !important;
+}
+
+/* 7. Tables, Headers, Rows & Cells */
+html.dark table thead,
+html.dark table thead tr,
+html.dark table thead th {
+  background-color: #1e293b !important;
+  color: #e2e8f0 !important;
+  border-color: #334155 !important;
+}
+
+html.dark table tbody tr {
+  border-color: #1e293b !important;
+}
+
+html.dark table tbody tr:hover {
+  background-color: rgba(30, 41, 59, 0.5) !important;
+}
+
+html.dark table td {
+  border-color: #1e293b !important;
+}
+
+/* 8. Modals, Dialogs, Dropdowns & Overlays */
+html.dark [role="dialog"],
+html.dark [role="dialog"] > div:not([class*="bg-transparent"]),
+html.dark [role="listbox"],
+html.dark .fixed.inset-0 .bg-white {
+  background-color: #0f172a !important;
+  border-color: #1e293b !important;
+  color: #f8fafc !important;
+}
+
+/* 9. Google Stitch Tokens: Dark Mode Overrides */
+html.dark .bg-background {
+  background-color: #020617 !important;
+  color: #f8fafc !important;
+}
+
+html.dark .text-on-surface {
+  color: #f8fafc !important;
+}
+
+html.dark .text-on-surface-variant,
+html.dark .text-secondary {
+  color: #94a3b8 !important;
+}
+
+html.dark .bg-surface,
+html.dark [class*="bg-surface/"] {
+  background-color: #0b0f19 !important;
+}
+
+html.dark .bg-surface-container-lowest {
+  background-color: #0f172a !important;
+}
+
+html.dark .bg-surface-container-low {
+  background-color: #060911 !important;
+}
+
+html.dark .bg-surface-container {
+  background-color: #1e293b !important;
+}
+
+html.dark .border-outline-variant,
+html.dark [class*="border-outline-variant/"] {
+  border-color: #1e293b !important;
+}
+
+html.dark .text-primary-container {
+  color: #a5b4fc !important; /* luminous indigo-300 */
+}
+
+html.dark [class*="bg-primary-fixed"] {
+  background-color: rgba(99, 102, 241, 0.18) !important;
+}
+
+html.dark [class*="border-primary-fixed-dim"] {
+  border-color: rgba(99, 102, 241, 0.35) !important;
+}
+
+html.dark .text-tertiary {
+  color: #6ee7b7 !important; /* bright emerald-300 */
+}
+
+html.dark [class*="bg-tertiary-fixed"] {
+  background-color: rgba(16, 185, 129, 0.18) !important;
+}
+
+html.dark .text-on-tertiary-fixed {
+  color: #a7f3d0 !important;
+}
+
+/* 10. Dark Mode Scrollbars */
+html.dark ::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+html.dark ::-webkit-scrollbar-track {
+  background: #020617;
+}
+html.dark ::-webkit-scrollbar-thumb {
+  background: #334155;
+  border-radius: 9999px;
+}
+html.dark ::-webkit-scrollbar-thumb:hover {
+  background: #475569;
+}
+
+/* Respect user reduced-motion preference */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

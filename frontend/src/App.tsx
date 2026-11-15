@@ -31,8 +31,11 @@ import { ExaminationWorkspace } from './components/ExaminationWorkspace';
 import { MainLauncherDashboard } from './components/MainLauncherDashboard';
 import { PublicWebsiteView } from './components/PublicWebsiteView';
 import { LoginView } from './components/LoginView';
+import { ForgotPasswordView } from './components/ForgotPasswordView';
+import { ResetPasswordView } from './components/ResetPasswordView';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { TenantContextGate } from './components/TenantContextGate';
+import { ThemeProvider, useOptionalTheme } from './context/ThemeContext';
 import { AuthProvider, useAuth, useOptionalAuth } from './context/AuthContext';
 import { UserRole } from './services/api';
 import {
@@ -664,7 +667,7 @@ export const ERPWorkspaceShell: React.FC = () => {
   const tenantKey = user?.role === UserRole.PLATFORM_SUPER_ADMIN ? (selectedSchoolId || 'no-tenant') : 'tenant';
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col font-sans">
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex flex-col font-sans transition-colors">
       <Header />
 
       <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 py-4 sm:py-8 overflow-x-hidden">
@@ -742,7 +745,7 @@ export const ERPWorkspaceShell: React.FC = () => {
         </div>
       </main>
 
-      <footer className="bg-white border-t border-slate-200 py-4 px-6 text-center text-xs text-slate-500">
+      <footer className="bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 py-4 px-6 text-center text-xs text-slate-500 dark:text-slate-400">
         School ERP Unified Platform • Multi-Tenant Enterprise Monolith Architecture
       </footer>
     </div>
@@ -768,14 +771,32 @@ export const LoginRouteWrapper: React.FC = () => {
   return <LoginView />;
 };
 
+export const ForgotPasswordRouteWrapper: React.FC = () => {
+  const { isAuthenticated, isLoading } = useAuth();
+  if (!isLoading && isAuthenticated) {
+    return <Navigate to="/app" replace />;
+  }
+  return <ForgotPasswordView />;
+};
+
+export const ResetPasswordRouteWrapper: React.FC = () => {
+  const { isAuthenticated, isLoading } = useAuth();
+  if (!isLoading && isAuthenticated) {
+    return <Navigate to="/app" replace />;
+  }
+  return <ResetPasswordView />;
+};
+
 export const AppRoutes: React.FC = () => {
   return (
     <Routes>
       {/* 1. Public Main Website */}
       <Route path="/" element={<PublicWebsiteRoute />} />
 
-      {/* 2. Authentication Login */}
+      {/* 2. Authentication Login & Password Recovery */}
       <Route path="/login" element={<LoginRouteWrapper />} />
+      <Route path="/forgot-password" element={<ForgotPasswordRouteWrapper />} />
+      <Route path="/reset-password" element={<ResetPasswordRouteWrapper />} />
 
       {/* 3. Protected Unified School ERP System */}
       <Route
@@ -794,21 +815,27 @@ export const AppRoutes: React.FC = () => {
   );
 };
 
-const AuthWrapper: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+const AppProvidersWrapper: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const existingTheme = useOptionalTheme();
   const existingAuth = useOptionalAuth();
-  if (existingAuth) {
-    return <>{children}</>;
+
+  let wrapped = children;
+  if (!existingAuth) {
+    wrapped = <AuthProvider>{wrapped}</AuthProvider>;
   }
-  return <AuthProvider>{children}</AuthProvider>;
+  if (!existingTheme) {
+    wrapped = <ThemeProvider>{wrapped}</ThemeProvider>;
+  }
+  return <>{wrapped}</>;
 };
 
 export const App: React.FC = () => {
   const inRouter = useInRouterContext();
 
   const content = (
-    <AuthWrapper>
+    <AppProvidersWrapper>
       <AppRoutes />
-    </AuthWrapper>
+    </AppProvidersWrapper>
   );
 
   if (!inRouter) {

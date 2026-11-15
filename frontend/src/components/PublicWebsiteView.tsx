@@ -1,7 +1,9 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { useOptionalTheme } from '../context/ThemeContext';
 import { CymbixLogo } from './CymbixLogo';
+import { ThemeToggle } from './ThemeToggle';
 import {
   School,
   ArrowRight,
@@ -12,6 +14,8 @@ import {
 export const PublicWebsiteView: React.FC = () => {
   const navigate = useNavigate();
   const { isAuthenticated } = useAuth();
+  const themeContext = useOptionalTheme();
+  const isDark = themeContext?.theme === 'dark';
 
   // Role Tab Switching state
   const [activeRole, setActiveRole] = useState<'super-admin' | 'school-admin' | 'fee-staff' | 'student' | 'parent'>('super-admin');
@@ -53,7 +57,7 @@ export const PublicWebsiteView: React.FC = () => {
         <div className="max-w-[1440px] mx-auto px-4 sm:px-6 lg:px-8 h-20 sm:h-[88px] lg:h-24 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <a href="/" className="flex items-center transition-opacity hover:opacity-90">
-              <CymbixLogo />
+              <CymbixLogo variant={isDark ? 'dark' : 'light'} />
               <span className="sr-only">School ERP</span>
             </a>
           </div>
@@ -82,7 +86,8 @@ export const PublicWebsiteView: React.FC = () => {
             </a>
           </nav>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2.5 sm:gap-3">
+            <ThemeToggle />
             {isAuthenticated ? (
               <button
                 onClick={() => navigate('/app')}
@@ -108,13 +113,17 @@ export const PublicWebsiteView: React.FC = () => {
       <section
         id="hero"
         className="relative overflow-hidden pt-12 pb-20 px-4 sm:px-6 lg:px-8 border-b border-outline-variant/30"
-        style={{ background: 'linear-gradient(180deg, #ffffff 0%, rgba(238, 242, 255, 0.25) 60%, #f8f9ff 100%)' }}
+        style={{
+          background: isDark
+            ? 'linear-gradient(180deg, #020617 0%, rgba(30, 41, 59, 0.4) 60%, #020617 100%)'
+            : 'linear-gradient(180deg, #ffffff 0%, rgba(238, 242, 255, 0.25) 60%, #f8f9ff 100%)',
+        }}
       >
         <div className="max-w-[1440px] mx-auto grid grid-cols-1 lg:grid-cols-12 gap-12 items-center">
           {/* Left Column: Copy & Value Proposition */}
           <div className="lg:col-span-6 flex flex-col items-start gap-6">
-            <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full text-primary-container bg-primary-fixed/40 border border-primary-fixed-dim/60 text-xs font-bold tracking-wider uppercase">
-              <span className="w-2 h-2 rounded-full bg-primary-container animate-pulse"></span>
+            <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full text-primary-container dark:text-indigo-300 bg-primary-fixed/40 dark:bg-indigo-950/60 border border-primary-fixed-dim/60 dark:border-indigo-500/30 text-xs font-bold tracking-wider uppercase transition-colors shadow-2xs">
+              <span className="w-2 h-2 rounded-full bg-primary-container dark:bg-indigo-400 animate-pulse"></span>
               BUILT FOR MODERN EDUCATIONAL INSTITUTIONS
             </div>
 

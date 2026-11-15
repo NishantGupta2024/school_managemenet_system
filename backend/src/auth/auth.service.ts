@@ -7,6 +7,8 @@ import {
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import * as crypto from 'crypto';
+import * as fs from 'fs';
+import * as path from 'path';
 import { PrismaService } from '../prisma/prisma.service';
 import { LoginDto } from './dto/login.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
@@ -516,8 +518,8 @@ export class AuthService {
     });
 
     // Dispatch email via SmtpEmailProvider
+    const resetLink = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/reset-password?token=${rawResetToken}`;
     try {
-      const resetLink = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/reset-password?token=${rawResetToken}`;
       await this.emailProvider.sendEmail({
         to: user.email,
         subject: `Password Reset Request | ${user.school?.name || 'School Fee System'}`,
@@ -536,6 +538,31 @@ export class AuthService {
       });
     } catch (emailErr: any) {
       this.logger.error(`Failed to dispatch password reset email to ${user.email}: ${emailErr.message}`);
+      if (process.env.NODE_ENV !== 'production') {
+        try {
+          const devDir = path.resolve(process.cwd(), 'storage', 'dev-mail-sink');
+          if (!fs.existsSync(devDir)) {
+            fs.mkdirSync(devDir, { recursive: true });
+          }
+          const devFile = path.join(devDir, 'latest-password-reset.json');
+          fs.writeFileSync(
+            devFile,
+            JSON.stringify(
+              {
+                recipient: user.email,
+                resetLink,
+                generatedAt: new Date().toISOString(),
+                note: 'LOCAL NON-PRODUCTION DEVELOPMENT SINK ONLY. Never deploy to production.',
+              },
+              null,
+              2,
+            ),
+            'utf8',
+          );
+        } catch {
+          // Best-effort local non-production sink file
+        }
+      }
     }
 
     await this.recordAuditLog(user.email, 'PASSWORD_RESET_LINK_DISPATCHED', user.id, user.schoolId, context);
